@@ -20,11 +20,16 @@ namespace ngstd
   bool TaskManager :: use_paje_trace = false;
   int TaskManager :: max_threads = getenv("NGS_NUM_THREADS") ? atoi(getenv("NGS_NUM_THREADS")) : std::thread::hardware_concurrency();
   int TaskManager :: num_threads = 1;
-  // #ifndef __clang__      
+
+  /*
+#ifndef __clangxx__      
   thread_local int TaskManager :: thread_id = 0;
-  // #else
-  // __thread int TaskManager :: thread_id;
-  // #endif
+#else
+  __thread int TaskManager :: thread_id;
+#endif
+  */
+  
+  thread_local int thread_id = 0;
 
   const function<void(TaskInfo&)> * TaskManager::func;
   const function<void()> * TaskManager::startup_function = nullptr;
@@ -147,7 +152,11 @@ namespace ngstd
     trace = nullptr;
   }
 
-
+  int TaskManager :: GetThreadId()
+  {
+    return thread_id;
+  }
+  
   void TaskManager :: StartWorkers()
   {
     done = false;
@@ -159,7 +168,8 @@ namespace ngstd
       {
         std::thread([this,i]() { this->Loop(i); }).detach();
       }
-
+    thread_id = 0;
+    
     size_t alloc_size = num_threads*NgProfiler::SIZE;
     NgProfiler::thread_times = new size_t[alloc_size];
     for (size_t i = 0; i < alloc_size; i++)
@@ -301,7 +311,7 @@ namespace ngstd
       if (workers_on_node[j])
         {
           while (complete[j] != jobnr)
-            ;
+            _mm_pause();
           /*
           while (completed_tasks+ntasks/num_nodes != nodedata[j]->completed_tasks)
             cout << "master, check node " << j << " node complete = " << nodedata[j]->completed_tasks << " should be " << completed_tasks+ntasks/num_nodes << endl;
@@ -438,15 +448,15 @@ namespace ngstd
 
         // for (auto ap : sync)
         // ap->load(); // memory_order_acquire);
-        
+
+        /*
+          // checking too much ????
         for (int j = 0; j < num_nodes; j++)
           while (completed_tasks > nodedata[j]->completed_tasks)
             ;
-        /*
-          cout << "mynode = " << mynode << ", j = " << completed_tasks << " node comp = " << nodedata[j]->completed_tasks << endl;
         */
-        
 
+        
         // atomic_thread_fence (memory_order_acquire);
         if (startup_function) (*startup_function)();
         
@@ -617,27 +627,112 @@ namespace ngstd
       {
         for (int k = 0; k < 1000; k++)
           {
-            SharedLoop2 sl(1000);
+            SharedLoop sl(5);
             ParallelJob ( [&sl] (TaskInfo ti)
                           {
-                            // auto beg = sl.begin();
-                            // auto end = sl.end();
+                            for (auto i : sl)
+                              ; 
                           } );
-            steps += 1;
           }
+        steps += 1000;
         time = WallTime()-starttime;
       }
     while (time < maxtime);
-    timings.push_back(make_tuple("SharedLoop begin/end", time/steps*1e9));
+    timings.push_back(make_tuple("short SharedLoop", time/steps*1e9));
     
-    
+
     starttime = WallTime();
     steps = 0;
     do
       {
         for (int k = 0; k < 1000; k++)
           {
-            SharedLoop2 sl(1000);
+            SharedLoop sl1(5), sl2(5), sl3(5), sl4(5), sl5(5);
+            ParallelJob ( [&sl1, &sl2, &sl3, &sl4, &sl5] (TaskInfo ti)
+                          {
+                            for (auto i : sl1)
+                              ;
+                            for (auto i : sl2)
+                              ;
+                            for (auto i : sl3)
+                              ;
+                            for (auto i : sl4)
+                              ;
+                            for (auto i : sl5)
+                              ;
+                          } );
+          }
+        steps += 1000;
+        time = WallTime()-starttime;
+      }
+    while (time < maxtime);
+    timings.push_back(make_tuple("5 short SharedLoops", time/steps*1e9));
+    
+
+    starttime = WallTime();
+    steps = 0;
+    SharedLoop2 sl2(5);
+    do
+      {
+        for (int k = 0; k < 1000; k++)
+          {
+            sl2.Reset(5);
+            ParallelJob ( [&sl2] (TaskInfo ti)
+                          {
+                            for (auto i : sl2)
+                              ; 
+                          } );
+          }
+        steps += 1000;
+        time = WallTime()-starttime;
+      }
+    while (time < maxtime);
+    timings.push_back(make_tuple("short SharedLoop2", time/steps*1e9));
+
+    {
+    starttime = WallTime();
+    steps = 0;
+    SharedLoop2 sl1(5), sl2(5), sl3(5), sl4(5), sl5(5);
+    do
+      {
+        for (int k = 0; k < 1000; k++)
+          {
+            sl1.Reset(5);
+            sl2.Reset(5);
+            sl3.Reset(5);
+            sl4.Reset(5);
+            sl5.Reset(5);
+            ParallelJob ( [&sl1,&sl2,&sl3,&sl4,&sl5] (TaskInfo ti)
+                          {
+                            for (auto i : sl1)
+                              ; 
+                            for (auto i : sl2)
+                              ; 
+                            for (auto i : sl3)
+                              ; 
+                            for (auto i : sl4)
+                              ; 
+                            for (auto i : sl5)
+                              ; 
+                          } );
+          }
+        steps += 1000;
+        time = WallTime()-starttime;
+      }
+    while (time < maxtime);
+    timings.push_back(make_tuple("5 short SharedLoop2", time/steps*1e9));
+    }
+
+    
+    starttime = WallTime();
+    steps = 0;
+    {
+    SharedLoop2 sl(1000);
+    do
+      {
+        for (int k = 0; k < 1000; k++)
+          {
+            sl.Reset(1000);
             ParallelJob ( [&sl] (TaskInfo ti)
                           {
                             for (auto i : sl)
@@ -648,13 +743,16 @@ namespace ngstd
         time = WallTime()-starttime;
       }
     while (time < maxtime);
-    timings.push_back(make_tuple("SharedLoop 1000", time/steps*1e9));
-    
+    timings.push_back(make_tuple("SharedLoop2 1000, time per iteration", time/steps*1e9));
+    }
+
+    {
     starttime = WallTime();
     steps = 0;
+    SharedLoop2 sl(1000000);
     do
       {
-        SharedLoop2 sl(1000000);
+        sl.Reset(1000000);
         ParallelJob ( [&sl] (TaskInfo ti)
                       {
                         for (auto i : sl)
@@ -664,7 +762,8 @@ namespace ngstd
         time = WallTime()-starttime;
       }
     while (time < maxtime);
-    timings.push_back(make_tuple("SharedLoop 1000000", time/steps*1e9));
+    timings.push_back(make_tuple("SharedLoop 1000000, time per iteration", time/steps*1e9));
+    }
     
     return timings;
   }
