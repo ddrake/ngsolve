@@ -160,8 +160,8 @@ namespace ngstd
   void TaskManager :: StartWorkers()
   {
     done = false;
-    sync.SetSize(num_threads);
-    sync[0] = new atomic<int>(0);
+    // sync.SetSize(num_threads);
+    // sync[0] = new atomic<int>(0);
     completed_tasks = 0;
     nodedata[0]->completed_tasks = 0;
     for (int i = 1; i < num_threads; i++)
@@ -200,7 +200,7 @@ namespace ngstd
     NgProfiler::thread_flops = dummy_thread_flops;    
     while (active_workers)
       ;
-    delete sync[0];
+    // delete sync[0];
     // cout << "workers all stopped !!!!!!!!!!!!!!!!!!!" << endl;
   }
 
@@ -220,7 +220,7 @@ namespace ngstd
       }
     */
     func = &afunc;
-    sync[0]->store(1); // , memory_order_release);
+    // sync[0]->store(1); // , memory_order_release);
 
     ntasks.store (antasks); // , memory_order_relaxed);
     ex = nullptr;
@@ -285,7 +285,7 @@ namespace ngstd
               {
 		RegionTracer t(ti.thread_nr, jobnr, RegionTracer::ID_JOB, ti.task_nr);
                 (*func)(ti); 
-                mynode_data.completed_tasks++;
+                // mynode_data.completed_tasks++;
               }
 
 	      // if (++mynode_data.complete_cnt == mytasks.Size())
@@ -320,7 +320,7 @@ namespace ngstd
         }
 
 
-    completed_tasks += ntasks / num_nodes;
+    //    completed_tasks += ntasks / num_nodes;
 //     for (int j = 0; j < num_nodes; j++)
 //       if (completed_tasks != nodedata[j]->completed_tasks)
 //         cout << "tasks missing: node = " << j 
@@ -331,8 +331,8 @@ namespace ngstd
       throw Exception (*ex);
 
     trace->StopJob();
-    for (auto ap : sync)
-      ap->load(); // memory_order_acquire);
+    // for (auto ap : sync)
+    // ap->load(); // memory_order_acquire);
   }
     
   void TaskManager :: Loop(int thd)
@@ -346,7 +346,7 @@ namespace ngstd
     static Timer tdec("decrement");
     thread_id = thd;
 
-    sync[thread_id] = new atomic<int>(0);
+    // sync[thread_id] = new atomic<int>(0);
 
     int thds = GetNumThreads();
 
@@ -397,53 +397,19 @@ namespace ngstd
               }
             continue;
           }
-        
-        /*
-        while (mynode_data.participate.load(memory_order_relaxed) == -1)
-          {
-            RegionTracer t(ti.thread_nr, tCAS1, ti.task_nr);            
-            if (done.load(memory_order_relaxed))
-              {
-                active_workers--;
-                return;
-              }
-          }
-        */
 
-
-        /*
-        int oldpart = 0;
-        while (! mynode_data.participate.compare_exchange_weak (oldpart, oldpart+1))
-	  {
-            RegionTracer t(ti.thread_nr, tCAS, ti.task_nr);
-	    if (oldpart == -1) oldpart = 0;
-            if (done.load(memory_order_relaxed))
-	      {
-		active_workers--;
-		return;
-	      }
-	  }
-        */
-
-        /*
-        int oldpart = 0;
-        if (! mynode_data.participate.compare_exchange_weak (oldpart, oldpart+1))
-          continue;
-        */
-
-        // non-atomic fast check ...
         {
           // RegionTracer t(ti.thread_nr, tADD, ti.task_nr);
-        if ( (mynode_data.participate & 1) == 0) continue;
 
-        {
+          // non-atomic fast check ...
+          if ( (mynode_data.participate & 1) == 0) continue;
+
           int oldval = mynode_data.participate += 2;
           if ( (oldval & 1) == 0)
             { // job not active, going out again
               mynode_data.participate -= 2;
               continue;
             }
-        }
         }
 
         // for (auto ap : sync)
@@ -456,7 +422,6 @@ namespace ngstd
             ;
         */
 
-        
         // atomic_thread_fence (memory_order_acquire);
         if (startup_function) (*startup_function)();
         
@@ -476,9 +441,9 @@ namespace ngstd
                 ti.ntasks = ntasks;
                 
                   {
-		    RegionTracer t(ti.thread_nr, jobnr, RegionTracer::ID_JOB, ti.task_nr);
+                    RegionTracer t(ti.thread_nr, jobnr, RegionTracer::ID_JOB, ti.task_nr);
                     (*func)(ti);
-                    mynode_data.completed_tasks++;
+                    // mynode_data.completed_tasks++;
                   }
 		  // if (++mynode_data.complete_cnt == mytasks.Size())
                   // complete[mynode] = true;
@@ -502,7 +467,7 @@ namespace ngstd
 #endif // __MIC__
 
         if (cleanup_function) (*cleanup_function)();
-        sync[thread_id]->store(1); // , memory_order_release);
+        // sync[thread_id]->store(1); // , memory_order_release);
 
         jobdone = jobnr;
 
@@ -531,7 +496,7 @@ namespace ngstd
     mkl_set_num_threads_local(mkl_max);
 #endif
 
-    delete sync[thread_id];
+    // delete sync[thread_id];
     workers_on_node[mynode]--;
     active_workers--;
   }
@@ -762,7 +727,7 @@ namespace ngstd
         time = WallTime()-starttime;
       }
     while (time < maxtime);
-    timings.push_back(make_tuple("SharedLoop 1000000, time per iteration", time/steps*1e9));
+    timings.push_back(make_tuple("SharedLoop2 1000000, time per iteration", time/steps*1e9));
     }
     
     return timings;
