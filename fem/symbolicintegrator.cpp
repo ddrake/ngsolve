@@ -511,11 +511,13 @@ namespace ngfem
   }
   */
 
+  /*
   static Timer telvec("SymbolicLFI::CalcElVec");
   static Timer telvec_mapping("SymbolicLFI::mapping");
   static Timer telvec_zero("SymbolicLFI::zero");
   static Timer telvec_applytrans("SymbolicLFI::applytrans");
   static Timer telvec_dvec("SymbolicLFI::dvec");
+  */
   
   template <typename SCAL>   
   void SymbolicLinearFormIntegrator ::
@@ -1446,8 +1448,59 @@ namespace ngfem
       }
   }
 
+
+  template <typename SCAL>
+  void ExtendSymmetric (SliceMatrix<SCAL> elmat)
+  {
+    /*
+    size_t h = elmat.Height();
+    for (size_t i = 0; i+1 < h; i++)
+      for (size_t j = i+1; j < h; j++)
+        elmat(i,j) = elmat(j,i);
+    */
+
+    size_t h = elmat.Height();
+    size_t d = elmat.Dist();
+    size_t i = 0, di = 0;
+    for ( ; i+2 < h; i+=2, di+=2*d)
+      {
+        elmat(di+i+1) = elmat(di+d+i);
+        size_t j = i+2, dj = di+2*d;
+        for ( ; j+1 < h; j+=2, dj+=2*d)
+          {
+            SCAL tmp00 = elmat(dj+i);
+            SCAL tmp01 = elmat(dj+i+1);
+            SCAL tmp10 = elmat(dj+d+i);
+            SCAL tmp11 = elmat(dj+d+i+1);
+            elmat(di+j) = tmp00;
+            elmat(di+d+j) = tmp01;
+            elmat(di+j+1) = tmp10;
+            elmat(di+d+j+1) = tmp11;
+          }
+        if (j < h)
+          {
+            SCAL tmp0 = elmat(dj+i);
+            SCAL tmp1 = elmat(dj+i+1);
+            elmat(di+j) = tmp0;
+            elmat(di+d+j) = tmp1;
+          }
+      }
+    /*
+    for ( ; i+1 < h; i++)
+      for (size_t j = i+1; j < h; j++)
+        elmat(i,j) = elmat(j,i);
+    */
+    if (i+1 < h)
+      elmat(di+i+1) = elmat(di+d+i);
+  }
+
+  void ExtendSymmetric1 (SliceMatrix<double> elmat)
+  {
+    ExtendSymmetric (elmat);
+  }
   
 
+  /*
   Timer timer_SymbBFI("SymbolicBFI");
   Timer timer_SymbBFIstart("SymbolicBFI start");
   Timer timer_SymbBFIscale("SymbolicBFI scale");
@@ -1456,7 +1509,7 @@ namespace ngfem
   Timer timer_SymbBFIdmat("SymbolicBFI dmat");
   Timer timer_SymbBFImult("SymbolicBFI mult");
   Timer timer_SymbBFImultsym("SymbolicBFI multsym");
-
+  */
 
   template <typename SCAL, typename SCAL_SHAPES, typename SCAL_RES>
   void SymbolicBilinearFormIntegrator ::
@@ -1499,7 +1552,7 @@ namespace ngfem
     if (simd_evaluate)
       try
         {
-          ThreadRegionTimer reg(timer_SymbBFI, TaskManager::GetThreadId());
+          // ThreadRegionTimer reg(timer_SymbBFI, TaskManager::GetThreadId());
           // NgProfiler::StartThreadTimer (timer_SymbBFIstart, TaskManager::GetThreadId());
 
           SIMD_IntegrationRule ir = Get_SIMD_IntegrationRule (fel, lh);
@@ -1689,23 +1742,33 @@ namespace ngfem
                       {
                       if (symmetric_so_far)
                         {
-                          ThreadRegionTimer regdmult(timer_SymbBFImultsym, TaskManager::GetThreadId());
-                          NgProfiler::AddThreadFlops(timer_SymbBFImultsym, TaskManager::GetThreadId(),
-                                                     SIMD<double>::Size()*2*r2.Size()*(r1.Size()+1)*hbbmat2.Width() / 2);
+                          /*
+                            ThreadRegionTimer regdmult(timer_SymbBFImultsym, TaskManager::GetThreadId());
+                            NgProfiler::AddThreadFlops(timer_SymbBFImultsym, TaskManager::GetThreadId(),
+                            SIMD<double>::Size()*2*r2.Size()*(r1.Size()+1)*hbbmat2.Width() / 2);
+                          */
                           AddABtSym (hbbmat2.Rows(r2), hbdbmat1.Rows(r1), part_elmat);
                         }
                       else
                         {
+                          /*
                           ThreadRegionTimer regdmult(timer_SymbBFImult, TaskManager::GetThreadId());
                           NgProfiler::AddThreadFlops(timer_SymbBFImult, TaskManager::GetThreadId(),
                                                      SIMD<double>::Size()*2*r2.Size()*r1.Size()*hbbmat2.Width());
+                          */
                           AddABt (hbbmat2.Rows(r2), hbdbmat1.Rows(r1), part_elmat);
                         }
                       }
                       if (symmetric_so_far)
-                        for (size_t i = 0; i < part_elmat.Height(); i++)
-                          for (size_t j = i+1; j < part_elmat.Width(); j++)
-                            part_elmat(i,j) = part_elmat(j,i);
+                        {
+                          ExtendSymmetric (part_elmat);
+                          /*
+                          size_t h = part_elmat.Height();
+                          for (size_t i = 0; i+1 < h; i++)
+                            for (size_t j = i+1; j < h; j++)
+                              part_elmat(i,j) = part_elmat(j,i);
+                          */
+                        }
                     }
               
                   l1 += proxy2->Dimension();
@@ -1971,7 +2034,7 @@ namespace ngfem
                             LocalHeap & lh) const
       
     {
-      static Timer t("symbolicBFI - CalcElementMatrix EB", 2);
+      // static Timer t("symbolicBFI - CalcElementMatrix EB", 2);
       /*
       static Timer tir("symbolicBFI - CalcElementMatrix EB - intrules", 2);
       static Timer td("symbolicBFI - CalcElementMatrix EB - dmats", 2);
