@@ -1206,12 +1206,16 @@ namespace ngcomp
                   
                   ParallelFor (Range(nfa), 
                                [&] (size_t i) 
-                               { 
+                               {
+                                 /*
                                  ArrayMem<int,4> f2ed;
                                  ma->GetFaceEdges (i, f2ed);
                                  for (int edge : f2ed)
                                    creator.Add (nv+edge, GetFaceDofs(i));
                                  f2ed.NothingToDelete();
+                                 */
+                                 for (auto edge : ma->GetFaceEdges(i))
+                                   creator.Add (nv+edge, GetFaceDofs(i));                                   
                                });
                   
                   ParallelFor (Range(ni), 
@@ -1414,7 +1418,8 @@ namespace ngcomp
 	    break; 	    
 	  }
       }
-    return shared_ptr<Table<int>> (creator.GetTable());
+    // return shared_ptr<Table<int>> (creator.GetTable());
+    return make_shared<Table<int>> (creator.MoveTable());
   }
     
 

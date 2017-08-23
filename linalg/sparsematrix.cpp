@@ -372,6 +372,8 @@ namespace ngla
     */
 
     static Timer timer("MatrixGraph");
+    static Timer timer_dof2el("MatrixGraph - build dof2el table");
+    static Timer timer_prefix("MatrixGraph - prefix");    
     RegionTimer reg (timer);
 
     bool includediag = (&rowelements == &colelements);
@@ -383,7 +385,7 @@ namespace ngla
     ParallelFor (Range(colelements.Size()), 
                  [&] (int i) { QuickSort (colelements[i]); });
     
-
+    timer_dof2el.Start();
     for ( ; !creator.Done(); creator++)
       {    
         ParallelFor (Range(rowelements.Size()),
@@ -394,14 +396,19 @@ namespace ngla
                      },
                      TasksPerThread(10));
       }
-
+    timer_dof2el.Stop();
 
     Table<int> dof2element = creator.MoveTable();
 
     Array<int> cnt(ndof);
-    cnt = 0;
+    // cnt = 0;
+    ParallelJob ([&] (TaskInfo ti)
+                 {
+                   auto r = Range(ndof).Split(ti.task_nr, ti.ntasks);
+                   cnt[r] = 0;
+                 });
 
-
+    /*
     class ProfileData
     {
     public:
@@ -409,7 +416,7 @@ namespace ngla
       int size;
     };
     Array<ProfileData> prof(ndof);
-    
+    */
     
 
 
@@ -433,8 +440,8 @@ namespace ngla
                  // auto myr = Range(ndof).Split (ti.task_nr,ti.ntasks);
                  for (int i : myr)
                    {
-                     prof[i].tstart = WallTime();
-                     prof[i].size = dof2element[i].Size();
+                     // prof[i].tstart = WallTime();
+                     // prof[i].size = dof2element[i].Size();
 
                      sizes.SetSize(dof2element[i].Size());
                      ptrs.SetSize(dof2element[i].Size());
@@ -459,7 +466,7 @@ namespace ngla
                                      cnti++; 
                                    } );
 
-                     prof[i].tend = WallTime();
+                     // prof[i].tend = WallTime();
                    }
                },
                TasksPerThread(20));
@@ -520,7 +527,7 @@ namespace ngla
                      else
                        colnr.Range(firsti[i], firsti[i+1]) = rowdofs;
                    }
-               });
+               }, TasksPerThread(5));
             
           }
         
@@ -532,7 +539,7 @@ namespace ngla
             owner = true;
             
             firsti.SetSize (size+1);
-            
+            /*
             nze = 0;
             for (int i = 0; i < size; i++)
               {
@@ -540,6 +547,39 @@ namespace ngla
                 nze += cnt[i];
               }
             firsti[size] = nze;
+            */
+            
+            timer_prefix.Start();
+            Array<size_t> partial_sums(TaskManager::GetNumThreads()+1);
+            partial_sums[0] = 0;
+            ParallelJob
+              ([&] (TaskInfo ti)
+               {
+                 IntRange r = IntRange(size).Split(ti.task_nr, ti.ntasks);
+                 size_t mysum = 0;
+                 for (size_t i : r)
+                   mysum += cnt[i];
+                 partial_sums[ti.task_nr+1] = mysum;
+               });
+
+            for (size_t i = 1; i < partial_sums.Size(); i++)
+              partial_sums[i] += partial_sums[i-1];
+
+            ParallelJob
+              ([&] (TaskInfo ti)
+               {
+                 IntRange r = IntRange(size).Split(ti.task_nr, ti.ntasks);
+                 size_t mysum = partial_sums[ti.task_nr];
+                 for (size_t i : r)
+                   {
+                     firsti[i] = mysum;
+                     mysum += cnt[i];
+                   }
+               });
+            nze = partial_sums[partial_sums.Size()-1];
+            firsti[size] = nze;
+            timer_prefix.Stop();
+            
             colnr = NumaDistributedArray<int> (nze+1);
 
 	    CalcBalancing ();
@@ -1629,8 +1669,8 @@ namespace ngla
   Timer timer_addelmat("SparseMatrixSymmetric::AddElementMatrix");
 
   template <class TM>
-  void SparseMatrixSymmetricTM<TM> ::
-  AddElementMatrix(FlatArray<int> dnums, BareSliceMatrix<TSCAL> elmat1, bool use_atomic)
+  void SparseMatrixTM<TM> ::
+  AddElementMatrixSymmetric(FlatArray<int> dnums, BareSliceMatrix<TSCAL> elmat1, bool use_atomic)
   {
     // static Timer timer ("SparseMatrixSymmetric::AddElementMatrix", 2);
     // RegionTimer reg (timer);
@@ -1719,9 +1759,9 @@ namespace ngla
   template <class TM, class TV>
   SparseMatrixSymmetric<TM,TV> :: 
   SparseMatrixSymmetric (const MatrixGraph & agraph, bool stealgraph)
-    : SparseMatrixTM<TM> (agraph, stealgraph), 
-      SparseMatrixSymmetricTM<TM> (agraph, stealgraph),
-      SparseMatrix<TM,TV,TV> (agraph, stealgraph)
+    // : SparseMatrixTM<TM> (agraph, stealgraph), 
+    // SparseMatrixSymmetricTM<TM> (agraph, stealgraph),
+    : SparseMatrix<TM,TV,TV> (agraph, stealgraph)
   { ; }
 
   template <class TM, class TV>
@@ -2605,7 +2645,7 @@ namespace ngla
 #endif
 
 
-
+  /*
   template class SparseMatrixSymmetricTM<double>;
   template class SparseMatrixSymmetricTM<Complex>;
 
@@ -2642,7 +2682,7 @@ namespace ngla
   template class SparseMatrixSymmetricTM<Mat<8,8,double> >;
   template class SparseMatrixSymmetricTM<Mat<8,8,Complex> >;
 #endif
-
+  */
 
 
 
