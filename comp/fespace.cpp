@@ -594,7 +594,8 @@ lot of new non-zero entries in the matrix!\n" << endl;
 
         while (found < cnt)
           {
-            // mask = 0;
+            // mask = 0   | tasks;
+
             ParallelForRange
               (mask.Size(), [&] (IntRange myrange)
                { for (auto i : myrange) mask[i] = 0; });

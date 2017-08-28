@@ -3565,9 +3565,9 @@ public:
   DomainWiseCoefficientFunction (Array<shared_ptr<CoefficientFunction>> aci)
     : BASE(1, false), ci(aci) 
   { 
-    for (auto cf : ci)
+    for (auto & cf : ci)
       if (cf && cf->IsComplex()) is_complex = true;
-    for (auto cf : ci)
+    for (auto & cf : ci)
       if (cf) SetDimension(cf->Dimension());
   }
 
@@ -3600,8 +3600,9 @@ public:
 
   virtual void TraverseTree (const function<void(CoefficientFunction&)> & func)   
   {
-    for (auto cf : ci)
-      cf->TraverseTree (func);
+    for (auto & cf : ci)
+      if (cf)
+        cf->TraverseTree (func);
     func(*this);
   }
 
@@ -4220,7 +4221,15 @@ public:
         cf->NonZeroPattern(ud, nonzero.Range(base,base+dimi));
         base += dimi;
       }
-  }  
+  }
+
+  virtual bool DefinedOn (const ElementTransformation & trafo)
+  {
+    for (auto & cf : ci)
+      if (!cf->DefinedOn(trafo)) return false;
+    return true;
+  }
+  
 
   using BASE::Evaluate;  
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const
@@ -4765,10 +4774,21 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
     virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const
     {
       return cf -> Evaluate(ip);
-      // throw Exception ("compiled mip evaluate not implemented");
     }
 
+    virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
+			  FlatVector<> result) const
+    {
+      cf->Evaluate (ip, result);      
+    }
 
+    virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
+			  FlatVector<Complex> result) const
+    {
+      cf->Evaluate (ip, result);
+    }
+
+    
     virtual void Evaluate (const BaseMappedIntegrationRule & ir, FlatMatrix<double> values) const
     {
       if(compiled_function)
