@@ -4557,14 +4557,8 @@ public:
 
     virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const {
         auto v = Var(index);
-        /*
-        if(dir==0) code.body += v.Assign(CodeExpr("ip.GetPoint()(0)"));
-        if(dir==1) code.body += v.Assign(CodeExpr("ip.GetPoint()(1)"));
-        if(dir==2) code.body += v.Assign(CodeExpr("ip.GetPoint()(2)"));
-        */
-        if(dir==0) code.body += v.Assign(CodeExpr("mir.GetPoints()(i,0)"));
-        if(dir==1) code.body += v.Assign(CodeExpr("mir.GetPoints()(i,1)"));
-        if(dir==2) code.body += v.Assign(CodeExpr("mir.GetPoints()(i,2)"));
+        // code.body += v.Assign(CodeExpr(string("mir.GetPoints()(i,")+ToString(dir)+")"));
+        code.body += v.Assign(CodeExpr(string("points(i,")+ToString(dir)+")"));
     }
 
     template <typename T>
@@ -4619,7 +4613,7 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
     lib_function_dderiv compiled_function_dderiv = nullptr;
     lib_function_simd_dderiv compiled_function_simd_dderiv = nullptr;
   public:
-    CompiledCoefficientFunction (shared_ptr<CoefficientFunction> acf, bool realcompile)
+    CompiledCoefficientFunction (shared_ptr<CoefficientFunction> acf, bool realcompile, int maxderiv)
       : CoefficientFunction(acf->Dimension(), acf->IsComplex()), cf(acf) // , compiled_function(nullptr), compiled_function_simd(nullptr)
     {
       SetDimensions (cf->Dimensions());
@@ -4670,7 +4664,7 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
 
         string parameters[3] = {"results", "deriv", "dderiv"};
 
-        for (int deriv : Range(3))
+        for (int deriv : Range(maxderiv+1))
         for (auto simd : {false,true}) {
             cout << IM(3) << "Compiled CF:" << endl;
             Code code;
@@ -4736,6 +4730,7 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
               s << ", " << param_type << parameters[i];
             s << " ) {" << endl;
             s << code.header << endl;
+            s << "auto points = mir.GetPoints();" << endl;
             s << "for ( auto i : Range(mir)) {" << endl;
             s << "auto & ip = mir[i];" << endl;
             s << code.body << endl;
@@ -4751,13 +4746,26 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
           pointer_code += "}\n";
           codes.push_back(pointer_code);
         }
-        library.Compile( codes );
-        compiled_function_simd = library.GetFunction<lib_function_simd>("CompiledEvaluateSIMD");
-        compiled_function = library.GetFunction<lib_function>("CompiledEvaluate");
-        compiled_function_simd_deriv = library.GetFunction<lib_function_simd_deriv>("CompiledEvaluateDerivSIMD");
-        compiled_function_deriv = library.GetFunction<lib_function_deriv>("CompiledEvaluateDeriv");
-        compiled_function_simd_dderiv = library.GetFunction<lib_function_simd_dderiv>("CompiledEvaluateDDerivSIMD");
-        compiled_function_dderiv = library.GetFunction<lib_function_dderiv>("CompiledEvaluateDDeriv");
+        std::thread( [this, codes, maxderiv] () {
+          try {
+              library.Compile( codes );
+              compiled_function_simd = library.GetFunction<lib_function_simd>("CompiledEvaluateSIMD");
+              compiled_function = library.GetFunction<lib_function>("CompiledEvaluate");
+              if(maxderiv>0)
+              {
+                  compiled_function_simd_deriv = library.GetFunction<lib_function_simd_deriv>("CompiledEvaluateDerivSIMD");
+                  compiled_function_deriv = library.GetFunction<lib_function_deriv>("CompiledEvaluateDeriv");
+              }
+              if(maxderiv>1)
+              {
+                  compiled_function_simd_dderiv = library.GetFunction<lib_function_simd_dderiv>("CompiledEvaluateDDerivSIMD");
+                  compiled_function_dderiv = library.GetFunction<lib_function_dderiv>("CompiledEvaluateDDeriv");
+              }
+              cout << IM(7) << "Compilation done" << endl;
+          } catch (const std::exception &e) {
+              cerr << IM(3) << "Compilation of CoefficientFunction failed: " << e.what() << endl;
+          }
+        }).detach();
       }
     }
 
@@ -5095,9 +5103,9 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
 
 
 
-  shared_ptr<CoefficientFunction> Compile (shared_ptr<CoefficientFunction> c, bool realcompile)
+  shared_ptr<CoefficientFunction> Compile (shared_ptr<CoefficientFunction> c, bool realcompile, int maxderiv)
   {
-    return make_shared<CompiledCoefficientFunction> (c, realcompile);
+    return make_shared<CompiledCoefficientFunction> (c, realcompile, maxderiv);
   }
   
 

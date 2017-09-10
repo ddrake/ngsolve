@@ -18,6 +18,38 @@ public:
 };
 
 
+template <typename T>
+py::tuple MakePyTuple (const BaseArrayObject<T> & ao)
+{
+  size_t s = ao.Size();
+  py::tuple tup(s);
+  for (size_t i = 0; i < s; i++)
+    tup[i] = ao[i];
+  return tup;
+}
+
+inline auto Nr2Vert(size_t nr) {  return NodeId(NT_VERTEX,nr); };
+inline auto Nr2Edge(size_t nr) {  return NodeId(NT_EDGE,nr); };
+inline auto Nr2Face(size_t nr) {  return NodeId(NT_FACE,nr); };
+
+
+/*
+namespace pybind11
+{
+  // would like to replace MakePyTuple by this cast, but doesn't work
+  template <typename T>
+  py::tuple cast (const BaseArrayObject<T> & ao)
+  {
+    size_t s = ao.Size();
+    py::tuple tup(s);
+    for (size_t i = 0; i < s; i++)
+      tup[i] = ao[i];
+    return tup;
+  }
+}
+*/
+
+
 class PyNumProc : public NumProc
 {
 public:
@@ -611,24 +643,32 @@ ANY_DOF: Any used dof (LOCAL_DOF or INTERFACE_DOF or WIREBASKET_DOF)
     auto & Mesh() { return ma; }
   };
 
-  py::class_<MeshNode> (m, "MeshNode", "an node within a mesh")
-    .def_property_readonly("vertices", [](MeshNode & node)
+  py::class_<MeshNode> (m, "MeshNode", "a node within a mesh")
+    .def_property_readonly("vertices", [](MeshNode & node) -> py::tuple
                            {
                              if (node.GetType() == NT_EDGE)
                                {
+                                 /*
                                  auto verts = node.Mesh().GetEdgePNums(node.GetNr());
                                  py::tuple tup(2);
                                  for (size_t i = 0; i < 2; i++)
                                    tup[i] = py::cast(NodeId(NT_VERTEX, verts[i]));
                                  return tup;
+                                 */
+                                 auto verts = node.Mesh().GetEdgePNums(node.GetNr());
+                                 return MakePyTuple (Substitute(verts, Nr2Vert));
                                }
                              if (node.GetType() == NT_FACE)
                                {
+                                 /*
                                  auto verts = node.Mesh().GetFacePNums(node.GetNr());
                                  py::tuple tup(verts.Size());
                                  for (size_t i = 0; i < verts.Size(); i++)
                                    tup[i] = py::cast(NodeId(NT_VERTEX, verts[i]));
                                  return tup;
+                                 */
+                                 auto verts = node.Mesh().GetFacePNums(node.GetNr());
+                                 return MakePyTuple (Substitute(verts, Nr2Vert));
                                }
                              throw py::type_error("vertices only available for edge and face nodes\n");
                            },
@@ -663,31 +703,18 @@ ANY_DOF: Any used dof (LOCAL_DOF or INTERFACE_DOF or WIREBASKET_DOF)
     .def("VB", &Ngs_Element::VB, "VorB of element")   
     .def_property_readonly("vertices", [](Ngs_Element &el)
                            {
-                             // return py::cast(Array<int>(el.Vertices()));
-                             py::tuple tuple(el.Vertices().Size());
-                             for (auto i : Range(el.Vertices()))
-                               // tuple[i] = py::int_(el.Vertices()[i]);
-                               tuple[i] = py::cast(NodeId(NT_VERTEX,el.Vertices()[i]));
-                             return tuple;
+                             return MakePyTuple(Substitute(el.Vertices(), Nr2Vert));
                            },
                            "tuple of global vertex numbers")
     .def_property_readonly("edges", [](Ngs_Element &el)
                            {
-                             // return py::cast(Array<int>(el.Edges()));
-                             py::tuple tuple(el.Edges().Size());
-                             for (auto i : Range(el.Edges()))
-                               tuple[i] = py::cast(NodeId(NT_EDGE,el.Edges()[i]));
-                             return tuple;
-                           } ,
+                             return MakePyTuple(Substitute(el.Edges(), Nr2Edge));
+                           },
                            "tuple of global edge numbers")
     .def_property_readonly("faces", [](Ngs_Element &el)
                            {
-                             // return py::cast(Array<int>(el.Faces()));
-                             py::tuple tuple(el.Faces().Size());
-                             for (auto i : Range(el.Faces()))
-                               tuple[i] = py::cast(NodeId(NT_FACE,el.Faces()[i]));
-                             return tuple;
-                           } ,
+                             return MakePyTuple(Substitute(el.Faces(), Nr2Face));
+                           },
                            "tuple of global face numbers")
     .def_property_readonly("type", [](Ngs_Element &self)
         { return self.GetType(); },
@@ -948,10 +975,8 @@ mesh (netgen.Mesh): a mesh generated from Netgen
     .def("GetMaterials",
 	 [](const MeshAccess & ma)
 	  {
-            py::list materials(ma.GetNDomains());
-	    for (int i : Range(ma.GetNDomains()))
-	      materials[i] = py::cast(ma.GetMaterial(VOL,i));
-	    return materials;
+            return MakePyTuple(ma.GetMaterials(VOL));
+            // return py::cast(ma.GetMaterials(VOL));
 	  },
 	 "Returns list of materials"
          )
@@ -959,20 +984,22 @@ mesh (netgen.Mesh): a mesh generated from Netgen
     .def("Materials",
 	 [](shared_ptr<MeshAccess> ma, string pattern) 
 	  {
-            return new Region (ma, VOL, pattern);
+            return Region (ma, VOL, pattern);
 	  },
          py::arg("pattern"),
-	 "Returns mesh-region matching the given regex pattern",
-         py::return_value_policy::take_ownership
+	 "Returns mesh-region matching the given regex pattern"
          )
     
     .def("GetBoundaries",
 	 [](const MeshAccess & ma)
 	  {
+            /*
             py::list materials(ma.GetNBoundaries());
 	    for (int i : Range(ma.GetNBoundaries()))
 	      materials[i] = py::cast(ma.GetMaterial(BND,i));
 	    return materials;
+            */
+            return MakePyTuple(ma.GetMaterials(BND));
 	  },
 	 "Returns list of boundary conditions"
          )
@@ -980,29 +1007,30 @@ mesh (netgen.Mesh): a mesh generated from Netgen
     .def("Boundaries",
 	 [](shared_ptr<MeshAccess> ma, string pattern)
 	  {
-            return new Region (ma, BND, pattern);
+            return Region (ma, BND, pattern);
 	  },
          py::arg("pattern"),
-	 "Returns boundary mesh-region matching the given regex pattern",
-         py::return_value_policy::take_ownership
+	 "Returns boundary mesh-region matching the given regex pattern"
          )
     .def("GetBBoundaries",
 	 [](const MeshAccess & ma)
 	  {
+            /*
 	    py::list bboundaries(ma.GetNBBoundaries());
 	    for (int i : Range(ma.GetNBBoundaries()))
 	      bboundaries[i] = py::cast(ma.GetMaterial(BBND,i));
 	    return bboundaries;
+            */
+            return MakePyTuple(ma.GetMaterials(BBND));
 	  },
 	 "Returns list of boundary conditions for co dimension 2"
 	 )
     .def("BBoundaries", [](shared_ptr<MeshAccess> ma, string pattern)
 	  {
-	    return new Region (ma, BBND, pattern);
+	    return Region (ma, BBND, pattern);
 	  },
 	 (py::arg("self"), py::arg("pattern")),
-	 "Returns co dim 2 boundary mesh-region matching the given regex pattern",
-	 py::return_value_policy::take_ownership
+	 "Returns co dim 2 boundary mesh-region matching the given regex pattern"
 	 )
 
     // TODO: explain how to mark elements
@@ -1597,20 +1625,26 @@ kwargs : For a description of the possible kwargs have a look a bit further down
 
     .def("GetDofNrs", [](shared_ptr<FESpace> self, ElementId ei)
          {
-           Array<int> tmp; self->GetDofNrs(ei,tmp); 
+           Array<int> tmp; self->GetDofNrs(ei,tmp);
+           return MakePyTuple(tmp);           
+           /*
            py::tuple tuple(tmp.Size());
            for (auto i : Range(tmp))
              tuple[i] = py::int_(tmp[i]);
            return tuple;
+           */
          })
 
     .def("GetDofNrs", [](shared_ptr<FESpace> self, NodeId ni)
          {
-           Array<int> tmp; self->GetDofNrs(ni,tmp); 
+           Array<int> tmp; self->GetDofNrs(ni,tmp);
+           /*
            py::tuple tuple(tmp.Size());
            for (auto i : Range(tmp))
              tuple[i] = py::int_(tmp[i]);
            return tuple;
+           */
+           return MakePyTuple(tmp);
          })
 
     .def("CouplingType", [](shared_ptr<FESpace> self, DofId dofnr) -> COUPLING_TYPE
@@ -3428,7 +3462,6 @@ flags : dict
     ;
 
   /////////////////////////////////////////////////////////////////////////////////////
-
 }
 
 
