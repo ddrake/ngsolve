@@ -216,7 +216,6 @@ namespace ngcomp
     
     if (low_order_bilinear_form)
       low_order_bilinear_form -> AddIntegrator (parts.Last());
-
     return *this;
   }
 
@@ -2297,6 +2296,7 @@ namespace ngcomp
     static mutex addelmatboundary1_mutex;
 
     RegionTimer reg (timer);
+    ma->PushStatus ("Assemble Linearization");
 
     if (this->mats.Size() < this->ma->GetNLevels())
       AllocateMatrix();
@@ -2594,9 +2594,9 @@ namespace ngcomp
         
 
         if (facetwise_skeleton_parts[VOL].Size())
-          throw Exception ("CalcLinearization for skeleton-VOL not implemented");
+          throw Exception ("CalcLinearization for facet-wise skeleton-VOL not implemented");
         if (elementwise_skeleton_parts.Size())
-          throw Exception ("CalcLinearization for skeleton-VOL not implemented");
+          throw Exception ("CalcLinearization for element-wise skeleton-VOL not implemented");
         
 
         if (facetwise_skeleton_parts[BND].Size())
@@ -2804,6 +2804,7 @@ namespace ngcomp
         throw (Exception (string(e.what()) +
                           string("\n in AssembleLinearization\n")));
       }
+    ma->PopStatus();
   }
 
 
@@ -3257,7 +3258,7 @@ namespace ngcomp
           }
         */      
 
-        for (auto vb : { VOL, BND, BBND } )
+        for (auto vb : { VOL, BND, BBND, BBBND } )
           if (VB_parts[vb].Size())
             {
               RegionTimer reg (timervol);
@@ -4017,6 +4018,33 @@ namespace ngcomp
       {
         LocalHeap lh (2000000, "biform-energy", true);
 
+        for (auto vb : { VOL, BND, BBND, BBBND })
+          IterateElements 
+            (*fespace, vb, lh, 
+             [&] (FESpace::Element ei, LocalHeap & lh)
+             {
+               const FiniteElement & fel = fespace->GetFE (ei, lh);
+               ElementTransformation & eltrans = ma->GetTrafo (ei, lh);
+
+               FlatArray<int> dnums = ei.GetDofs();
+               FlatVector<SCAL> elvecx (dnums.Size()*GetFESpace()->GetDimension(), lh);
+               
+               x.GetIndirect (dnums, elvecx);
+               fespace->TransformVec (ei, elvecx, TRANSFORM_SOL);
+               
+               double energy_T = 0;
+
+               for (auto & bfi : VB_parts[vb])
+                 {
+		   if (!bfi->DefinedOn (ei.GetIndex())) continue;
+                   energy_T += bfi->Energy (fel, eltrans, elvecx, lh);
+                 }
+
+               energy += energy_T;
+             });
+
+        
+        /*
         bool hasbound = false;
         bool hasinner = false;
 
@@ -4081,7 +4109,8 @@ namespace ngcomp
                   energy += bfi.Energy (fel, eltrans, elvecx, lh);
                 }
             }
-
+        */
+        Array<int> dnums;
         for (int i = 0; i < fespace->specialelements.Size(); i++)
           {
             HeapReset hr(lh);

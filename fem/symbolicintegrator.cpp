@@ -30,6 +30,7 @@ namespace ngfem
       ttrace_evaluator(attrace_evaluator),
       ttrace_deriv_evaluator(attrace_deriv_evaluator)
   {
+    /*
     if (!aevaluator)
       {
         cerr << "don't have a primal evaluator" << endl;
@@ -37,13 +38,18 @@ namespace ngfem
         if (deriv_evaluator) cout << "deriv-eval = " << typeid(*deriv_evaluator).name() << endl;
         throw Exception("don't have a primal evaluator");
       }
+    */
     if (deriv_evaluator || trace_deriv_evaluator)
       deriv_proxy = make_shared<ProxyFunction> (testfunction, is_complex,
                                                 deriv_evaluator, nullptr,
                                                 trace_deriv_evaluator, nullptr,
 						ttrace_deriv_evaluator, nullptr);
-
-    SetDimensions (evaluator->Dimensions());
+    if (evaluator)
+      SetDimensions (evaluator->Dimensions());
+    else if (trace_evaluator)
+      SetDimensions (trace_evaluator->Dimensions());
+    else
+      SetDimensions (ttrace_evaluator->Dimensions());
   }
   
   shared_ptr<ProxyFunction> ProxyFunction :: Trace() const
@@ -94,11 +100,11 @@ namespace ngfem
         header += Var("comp", index,i,j).Declare("{scal_type}", 0.0);
         if(!testfunction && code.deriv==2)
         {
-          header += "if(( ({ud}->trialfunction == {this}) && ({ud}->trial_comp=="+ToString(ind)+"))\n"+
-          " ||  (({ud}->testfunction == {this}) && ({ud}->test_comp=="+ToString(ind)+")))\n";
+          header += "if(( ({ud}->trialfunction == {this}) && ({ud}->trial_comp=="+ToLiteral(ind)+"))\n"+
+          " ||  (({ud}->testfunction == {this}) && ({ud}->test_comp=="+ToLiteral(ind)+")))\n";
         }
         else
-          header += "if({ud}->{comp_string}=="+ToString(ind)+" && {ud}->{func_string} == {this})\n";
+          header += "if({ud}->{comp_string}=="+ToLiteral(ind)+" && {ud}->{func_string} == {this})\n";
         header += Var("comp", index,i,j).S() + string("{get_component}") + " = 1.0;\n";
     });
     string body = "";
@@ -116,9 +122,9 @@ namespace ngfem
             var += ".Value()";
           string values = "{values}";
           if(code.is_simd)
-            values += "(" + ToString(ind) + ",i)";
+            values += "(" + ToLiteral(ind) + ",i)";
           else
-            values += "(i," + ToString(ind) + ")";
+            values += "(i," + ToLiteral(ind) + ")";
 
           body += var + " = " + values + ";\n";
       });
@@ -144,11 +150,11 @@ namespace ngfem
     string func_string = testfunction ? "testfunction" : "trialfunction";
     string comp_string = testfunction ? "test_comp" : "trial_comp";
     std::map<string,string> variables;
-    variables["ud"] = "tmp_"+ToString(index)+"_0";
+    variables["ud"] = "tmp_"+ToLiteral(index)+"_0";
     variables["this"] = "reinterpret_cast<ProxyFunction*>("+code.AddPointer(this)+")";
     variables["func_string"] = testfunction ? "testfunction" : "trialfunction";
     variables["comp_string"] = testfunction ? "test_comp" : "trial_comp";
-    variables["testfunction"] = ToString(testfunction);
+    variables["testfunction"] = ToLiteral(testfunction);
 
     variables["flatmatrix"] = code.is_simd ? "FlatMatrix<SIMD<double>>" : "FlatMatrix<double>";
 
@@ -463,6 +469,12 @@ namespace ngfem
          if (proxy && !proxies.Contains(proxy))
            proxies.Append (proxy);
        });
+  }
+
+  void SymbolicLinearFormIntegrator::SetIntegrationRule(const IntegrationRule &_ir)
+  {
+    ir = _ir.Copy();
+    simd_ir = SIMD_IntegrationRule(ir);
   }
 
   /*
@@ -2152,27 +2164,13 @@ namespace ngfem
       {
         T_CalcLinearizedElementMatrixEB<double,double> (fel, trafo, elveclin, elmat, lh);
         return;
-        
-        /*
-        switch (trafo.SpaceDim())
-          {
-          case 1:
-            T_CalcLinearizedElementMatrixEB<1,double,double> (fel, trafo, elveclin, elmat, lh);
-            return;
-          case 2:
-            T_CalcLinearizedElementMatrixEB<2,double,double> (fel, trafo, elveclin, elmat, lh);            
-            return;
-          case 3:
-            T_CalcLinearizedElementMatrixEB<3,double,double> (fel, trafo, elveclin, elmat, lh);
-            return;
-          default:
-            throw Exception ("Illegal space dimension" + ToString(trafo.SpaceDim()));
-          }
-        */
       }
 
     
-    // static Timer t("symbolicbfi - calclinearized", 2);
+    static Timer t("symbolicbfi - calclinearized", 2);
+    size_t tid = TaskManager::GetThreadId();
+    ThreadRegionTimer reg(t, tid);
+    
     // static Timer td("symbolicbfi - calclinearized dmats", 2);
     // RegionTimer reg(t);
 
@@ -2370,9 +2368,10 @@ namespace ngfem
                                    FlatMatrix<double> elmat,
                                    LocalHeap & lh) const
   {
+    size_t tid = TaskManager::GetThreadId();    
     static Timer t("symbolicbfi - calclinearized EB", 2);
     static Timer td("symbolicbfi - calclinearized EB dmats", 2);
-    // RegionTimer reg(t);
+    ThreadRegionTimer reg(t, tid);
     
     elmat = 0;
 
@@ -2522,7 +2521,8 @@ namespace ngfem
                 HeapReset hr(lh);
                 auto proxy1 = trial_proxies[k1];
                 auto proxy2 = test_proxies[l1];
-                td.Start();
+                // td.Start();
+                NgProfiler::StartThreadTimer(td, tid);                
                 FlatTensor<3> proxyvalues(lh, mir.Size(), proxy2->Dimension(), proxy1->Dimension());
                 
                 for (int k = 0; k < proxy1->Dimension(); k++)
@@ -2541,7 +2541,8 @@ namespace ngfem
                     else
                       proxyvalues(STAR,l,k) = 0.0;
                         
-                td.Stop();
+                // td.Stop();
+                NgProfiler::StopThreadTimer(td, tid);                                
 
                 for (int i = 0; i < mir.Size(); i++)
                   proxyvalues(i,STAR,STAR) *= ir_facet[i].Weight() * mir[i].GetMeasure(); 
@@ -4056,17 +4057,19 @@ namespace ngfem
                                                  FlatMatrix<double> elmat,
                                                  LocalHeap & lh) const
   {
-    // static Timer t("symbolicenergy - calclinearized", 2);
-    // static Timer tint("symbolicenergy - calclinearized intrules", 2);
-    // static Timer tapply("symbolicenergy - calclinearized apply", 2);
-    // static Timer td("symbolicenergy - calclinearized dmats", 2);
-    // static Timer tb("symbolicenergy - calclinearized bmats", 2);
-    // static Timer tbd("symbolicenergy - calclinearized bd", 2);
-    // static Timer tmult("symbolicenergy - calclinearized mult", 2);
+    static Timer t("symbolicenergy - calclinearized", 2);
+    static Timer tint("symbolicenergy - calclinearized intrules", 2);
+    static Timer tapply("symbolicenergy - calclinearized apply", 2);
+    static Timer td("symbolicenergy - calclinearized dmats", 2);
+    static Timer tb("symbolicenergy - calclinearized bmats", 2);
+    static Timer tbd("symbolicenergy - calclinearized bd", 2);
+    static Timer tmult("symbolicenergy - calclinearized mult", 2);
     // RegionTimer reg(t);
 
+    size_t tid = TaskManager::GetThreadId();
+    ThreadRegionTimer reg(t, tid);
+
     if (simd_evaluate)
-      //if (false)
       {
         try
           {
@@ -4199,6 +4202,8 @@ namespace ngfem
     IntegrationRule ir(trafo.GetElementType(), 2*fel.Order());
     BaseMappedIntegrationRule & mir = trafo(ir, lh);
 
+    NgProfiler::StartThreadTimer(tapply, tid);
+
     ProxyUserData ud(trial_proxies.Size(), lh);
     const_cast<ElementTransformation&>(trafo).userdata = &ud;
     ud.fel = &fel;
@@ -4209,13 +4214,14 @@ namespace ngfem
         ud.AssignMemory (proxy, ir.Size(), proxy->Dimension(), lh);
         proxy->Evaluator()->Apply(fel, mir, elveclin, ud.GetMemory(proxy), lh);        
       }
-    
+    NgProfiler::StopThreadTimer(tapply, tid);    
     FlatMatrix<> val(mir.Size(), 1,lh), deriv(mir.Size(), 1,lh), dderiv(mir.Size(), 1,lh);
     
     elmat = 0;
     
 
-
+    NgProfiler::StartThreadTimer(td, tid);
+    
     FlatArray<FlatMatrix<>> diags(trial_proxies.Size(), lh);
     for (int k1 : Range(trial_proxies))
       {
@@ -4232,6 +4238,7 @@ namespace ngfem
             diags[k1].Col(k) = dderiv.Col(0);
           }
       }
+    NgProfiler::StopThreadTimer(td, tid);
            
     
     for (int k1 : Range(trial_proxies))
@@ -4240,7 +4247,9 @@ namespace ngfem
           HeapReset hr(lh);
           auto proxy1 = trial_proxies[k1];
           auto proxy2 = trial_proxies[l1];
-          // td.Start();
+
+          NgProfiler::StartThreadTimer(td, tid);
+          
           // Tensor<3> proxyvalues(mir.Size(), proxy2->Dimension(), proxy1->Dimension());
           FlatTensor<3> proxyvalues(lh, mir.Size(), proxy2->Dimension(), proxy1->Dimension());
           
@@ -4262,7 +4271,7 @@ namespace ngfem
                     proxyvalues(STAR,l,k) *= 0.5;
                   }
               }
-          // td.Stop();
+          NgProfiler::StopThreadTimer(td, tid);
 
           /*
           for (int i = 0; i < mir.Size(); i++)
@@ -4291,29 +4300,40 @@ namespace ngfem
 
           constexpr size_t BS = 16;
           size_t i = 0;
-          for ( ; i+BS <= mir.Size(); i+=BS)
+          for ( ; i < mir.Size(); i+=BS)
             {
               HeapReset hr(lh);
-              FlatMatrix<double,ColMajor> bdbmat1(BS*proxy2->Dimension(), elmat.Width(), lh);
-              FlatMatrix<double,ColMajor> bbmat2(BS*proxy2->Dimension(), elmat.Height(), lh);
+              int bs = min2(size_t(BS), ir.GetNIP()-i);
+              FlatMatrix<double,ColMajor> bdbmat1(bs*proxy2->Dimension(), elmat.Width(), lh);
+              FlatMatrix<double,ColMajor> bbmat2(bs*proxy2->Dimension(), elmat.Height(), lh);
 
-              for (size_t j = 0; j < BS; j++)
+              for (size_t j = 0; j < bs; j++)
                 {
                   size_t ii = i+j;
                   IntRange r2 = proxy2->Dimension() * IntRange(j,j+1);
                   // tb.Start();
+                  NgProfiler::StartThreadTimer(tb, tid);                  
                   proxy1->Evaluator()->CalcMatrix(fel, mir[ii], bmat1, lh);
                   proxy2->Evaluator()->CalcMatrix(fel, mir[ii], bmat2, lh);
                   // tb.Stop();
+                  NgProfiler::StopThreadTimer(tb, tid);
+                  NgProfiler::StartThreadTimer(tbd, tid);
+                  // extern int myvar;
+                  // myvar++;
                   bdbmat1.Rows(r2) = proxyvalues(ii,STAR,STAR) * bmat1;
+                  // myvar++;                  
+                  NgProfiler::StopThreadTimer(tbd, tid);
                   bbmat2.Rows(r2) = bmat2;
                 }
               // tmult.Start();
-              elmat += Trans (bbmat2) * bdbmat1 | Lapack;
+              NgProfiler::StartThreadTimer(tmult, tid);                                
+              // elmat += Trans (bbmat2) * bdbmat1 | Lapack;
+              AddABt (Trans(bbmat2), Trans(bdbmat1), elmat);
+              NgProfiler::StopThreadTimer(tmult, tid);                                              
               // tmult.Stop();
             }
 
-
+          /*
           if (i < mir.Size())
             {
               HeapReset hr(lh);
@@ -4336,6 +4356,7 @@ namespace ngfem
               elmat += Trans (bbmat2) * bdbmat1 | Lapack;
               // tmult.Stop();
             }
+          */
           /*
           for ( ; i < mir.Size(); i++)
             {
