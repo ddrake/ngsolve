@@ -492,7 +492,13 @@ val : can be one of the following:
 )raw")
     .def(py::init([] (py::object val, py::object dims)
         {
-          auto coef = MakeCoefficient(val);
+          shared_ptr<CoefficientFunction> coef;
+          
+          py::extract<shared_ptr<CF>> ecf(val);
+          if (ecf.check())
+            coef = UnaryOpCF (ecf(), [](auto x) { return x; }, " ");
+          else
+            coef = MakeCoefficient(val);
           if(dims)
             {
               try {
@@ -667,6 +673,8 @@ val : can be one of the following:
                       return TransposeCF(coef);
                     },
                    "transpose of matrix-valued CF")
+    .def_property_readonly ("real", [](shared_ptr<CF> coef) { return Real(coef); }, "real part of CF")
+    .def_property_readonly ("imag", [](shared_ptr<CF> coef) { return Imag(coef); }, "imaginary part of CF")
 
     .def ("Compile", [] (shared_ptr<CF> coef, bool realcompile, int maxderiv, bool wait)
            { return Compile (coef, realcompile, maxderiv, wait); },
@@ -689,7 +697,7 @@ val : can be one of the following:
 
   ExportStdMathFunction2<GenericATan2>(m, "atan2");
   ExportStdMathFunction2<GenericPow>(m, "pow");
-  
+
   m.def ("IfPos", [] (shared_ptr<CF> c1, py::object then_obj, py::object else_obj)
             {
               return IfPos(c1,
