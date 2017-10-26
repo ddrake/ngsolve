@@ -702,8 +702,10 @@ lot of new non-zero entries in the matrix!\n" << endl;
     int basecol = 0;
     Array<unsigned int> mask(GetNDof());
 
-    int cnt = nf, found = 0;
-    Array<int> dofs, dofs1, elnums; 
+    size_t cnt = nf, found = 0;
+    Array<DofId> dofs, dofs1;
+    Array<int> elnums, elnums_per;
+    
     do
       {
         mask = 0;
@@ -713,7 +715,18 @@ lot of new non-zero entries in the matrix!\n" << endl;
             
             ma->GetFacetElements(f,elnums);
             dofs.SetSize0();
-            for (int el : elnums)
+
+            if (elnums.Size() == 1)
+              {
+                size_t f2 = ma->GetPeriodicFacet(f);
+                // if (f2 < f) continue;
+                if (f2 != f) // color both, left and right facet
+                  {
+                    ma->GetFacetElements (f2, elnums_per);
+                    elnums.Append(elnums_per[0]);
+                  }
+              }
+            for (auto el : elnums)
               {
                 GetDofNrs(ElementId(VOL, el), dofs1);
                 dofs += dofs1;
