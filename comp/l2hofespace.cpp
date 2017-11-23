@@ -923,6 +923,38 @@ namespace ngcomp
 
 
 
+
+  class VectorL2FESpace : public CompoundFESpace
+  {
+  public:
+    VectorL2FESpace (shared_ptr<MeshAccess> ama, const Flags & flags, 
+                     bool checkflags = false)
+      : CompoundFESpace(ama, flags)
+    {
+      for (int i = 0; i <  ma->GetDimension(); i++)
+        AddSpace (make_shared<L2HighOrderFESpace> (ama, flags));
+
+      switch (ma->GetDimension())
+        {
+        case 2:
+          evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorH1<2>>>();
+          flux_evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpGradVectorH1<2>>>();
+          additional_evaluators.Set ("div", make_shared<T_DifferentialOperator<DiffOpDivVectorH1<2>>> ());
+          break;
+        case 3:
+          evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorH1<3>>>();
+          flux_evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpGradVectorH1<3>>>();
+          additional_evaluators.Set ("div", make_shared<T_DifferentialOperator<DiffOpDivVectorH1<3>>> ());
+          break;
+        }
+    }
+  };
+    
+
+  static RegisterFESpace<VectorL2FESpace> initvecl2 ("VectorL2");
+  
+
+
   // register FESpaces
   namespace l2hofespace_cpp
   {
