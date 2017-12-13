@@ -278,9 +278,9 @@ namespace ngbla
 
   /* ***************************** A * B^T *************************************** */
 
-  template <typename FUNC>
+  template <typename TAB, typename FUNC>
   INLINE void TAddABt4 (size_t wa, size_t hc, size_t wc,
-                        double * pa, size_t da, double * pb, size_t db, double * pc, size_t dc,
+                        TAB * pa, size_t da, TAB * pb, size_t db, double * pc, size_t dc,
                         FUNC func)
   {
 #ifdef __AVX512F__
@@ -289,11 +289,11 @@ namespace ngbla
     constexpr size_t HA = 3;
 #endif
     
-    double * pb0 = pb;
+    TAB * pb0 = pb;
     size_t i = 0;
     for ( ; i+HA <= hc; i += HA, pa += HA*da, pc += HA*dc)
       {
-        double * pb = pb0;
+        TAB * pb = pb0;
         size_t j = 0;
         for ( ; j+4 <= wc; j += 4, pb += 4*db)
           {
@@ -317,7 +317,7 @@ namespace ngbla
     for ( ; i < hc; i ++, pa += da, pc += dc)
       {
         double * pc1 = pc;
-        double * pb = pb0;
+        TAB * pb = pb0;
         size_t j = 0;
         for ( ; j+4 <= wc; j += 4, pb += 4*db)
           {
@@ -335,27 +335,22 @@ namespace ngbla
   }
   
 
-  template <typename FUNC>
-  void TAddABt3 (size_t wa, size_t ha, size_t hb,
-                 double * pa, size_t da, double * pb, size_t db, double * pc, size_t dc,
-                 FUNC func)
-  {
-    constexpr size_t bs = 32;  // height b
-    for (size_t i = 0; i < hb; i += bs, pb += bs*db, pc += bs)
-      TAddABt4 (wa, ha, min2(bs, hb-i),
-                pa, da, pb, db, pc, dc, func);
-  }
-
-  template <typename FUNC>
+  template <typename TAB, typename FUNC>
   void TAddABt2 (size_t wa, size_t ha, size_t hb,
-                 double * pa, size_t da, double * pb, size_t db, double * pc, size_t dc,
-                 // SliceMatrix<double> a, SliceMatrix<double> b, SliceMatrix<double> c,
+                 TAB * pa, size_t da, TAB * pb, size_t db, double * pc, size_t dc,
                  FUNC func)
   {
-    constexpr size_t bs = 96; // height a
-    for (size_t i = 0; i < ha; i += bs, pa += bs*da, pc += bs*dc)
-      TAddABt3(wa, min2(bs, ha-i), hb,
-               pa, da, pb, db, pc, dc, func);
+    constexpr size_t bsa = 96; // height a
+    constexpr size_t bsb = 32; // height b    
+    for (size_t i = 0; i < ha; i += bsa, pa += bsa*da, pc += bsa*dc)
+      {
+        size_t hha = min2(bsa, ha-i);
+        TAB * hpb = pb;
+        for (size_t j = 0; j < hb; j += bsb, hpb += bsb*db)
+          TAddABt4 (wa, hha, min2(bsb, hb-j),
+                    pa, da, hpb, db, pc+j, dc, func);
+        
+      }
   }
 
   
@@ -392,85 +387,6 @@ namespace ngbla
 
   /* ***************************** A * B^T, A,B SIMD *********************************** */
 
-  template <typename FUNC>
-  INLINE void TAddABt4 (size_t wa, size_t hc, size_t wc,
-                        SIMD<double> * pa, size_t da, SIMD<double> * pb, size_t db, double * pc, size_t dc,
-                        FUNC func)
-  {
-#ifdef __AVX512F__
-    constexpr size_t HA = 6;
-#else
-    constexpr size_t HA = 3;
-#endif
-    
-    SIMD<double> * pb0 = pb;
-    size_t i = 0;
-    for ( ; i+HA <= hc; i += HA, pa += HA*da, pc += HA*dc)
-      {
-        SIMD<double> * pb = pb0;
-        size_t j = 0;
-        for ( ; j+4 <= wc; j += 4, pb += 4*db)
-          {
-            auto scal = MatKernelScalAB<HA,4>(wa, pa, da, pb, db);
-            Iterate<HA> ([&] (auto i) {
-                double * pci = pc+i.value*dc+j;
-                auto si = func (SIMD<double,4>(pci), get<i.value>(scal));
-                si.Store(pci);
-              });
-          }
-        for ( ; j < wc; j++, pb += db)
-          {
-            auto scal = MatKernelScalAB<HA,1>(wa, pa, da, pb, db);
-            Iterate<HA> ([&] (auto i) {
-                double * pci = pc+i.value*dc+j;
-                auto si = func (*pci, get<i.value>(scal));
-                *pci = si;
-              });
-          }
-      }
-    for ( ; i < hc; i ++, pa += da, pc += dc)
-      {
-        double * pc1 = pc;
-        SIMD<double> * pb = pb0;
-        size_t j = 0;
-        for ( ; j+4 <= wc; j += 4, pb += 4*db)
-          {
-            auto scal = MatKernelScalAB<1,4>(wa, pa, da, pb, db);
-            auto s1 = func (SIMD<double,4>(pc1+j), get<0>(scal));
-            s1.Store(pc1+j);
-          }
-        for ( ; j < wc; j++, pb += db)
-          {
-            auto scal = MatKernelScalAB<1,1>(wa, pa, da, pb, db);
-            auto s1 = func (pc1[j], get<0>(scal));
-            pc1[j] = s1;
-          }
-      }
-  }
-  
-
-  template <typename FUNC>
-  void TAddABt3 (size_t wa, size_t ha, size_t hb,
-                 SIMD<double> * pa, size_t da, SIMD<double> * pb, size_t db, double * pc, size_t dc,
-                 FUNC func)
-  {
-    constexpr size_t bs = 32;  // height b
-    for (size_t i = 0; i < hb; i += bs, pb += bs*db, pc += bs)
-      TAddABt4 (wa, ha, min2(bs, hb-i),
-                pa, da, pb, db, pc, dc, func);
-  }
-
-  template <typename FUNC>
-  void TAddABt2 (size_t wa, size_t ha, size_t hb,
-                 SIMD<double> * pa, size_t da, SIMD<double> * pb, size_t db, double * pc, size_t dc,
-                 FUNC func)
-  {
-    constexpr size_t bs = 96; // height a
-    for (size_t i = 0; i < ha; i += bs, pa += bs*da, pc += bs*dc)
-      TAddABt3(wa, min2(bs, ha-i), hb,
-               pa, da, pb, db, pc, dc, func);
-  }
-
   
   template <typename FUNC>
   void TAddABt1 (SliceMatrix<SIMD<double>> a, SliceMatrix<SIMD<double>> b, BareSliceMatrix<double> c,
@@ -501,7 +417,670 @@ namespace ngbla
 
 
 
+  /* *********************** AddABt-Sym ************************ */
 
+  template <typename TAB, typename FUNC>
+  INLINE void TAddABt4Sym (size_t wa, size_t hc, size_t wc,
+                           TAB * pa, size_t da, TAB * pb, size_t db, double * pc, size_t dc,
+                           FUNC func)
+  {
+#ifdef __AVX512F__
+    constexpr size_t HA = 6;
+#else
+    constexpr size_t HA = 3;
+#endif
+    
+    TAB * pb0 = pb;
+    size_t i = 0;
+    for ( ; i+HA <= hc; i += HA, pa += HA*da, pc += HA*dc)
+      {
+        TAB * pb = pb0;
+        size_t j = 0;
+        for ( ; j+4 <= i+HA; j += 4, pb += 4*db)
+          {
+            auto scal = MatKernelScalAB<HA,4>(wa, pa, da, pb, db);
+            Iterate<HA> ([&] (auto i) {
+                double * pci = pc+i.value*dc+j;
+                auto si = func (SIMD<double,4>(pci), get<i.value>(scal));
+                si.Store(pci);
+              });
+          }
+        for ( ; j < i+HA; j++, pb += db)
+          {
+            auto scal = MatKernelScalAB<HA,1>(wa, pa, da, pb, db);
+            Iterate<HA> ([&] (auto i) {
+                double * pci = pc+i.value*dc+j;
+                auto si = func (*pci, get<i.value>(scal));
+                *pci = si;
+              });
+          }
+      }
+    for ( ; i < hc; i ++, pa += da, pc += dc)
+      {
+        double * pc1 = pc;
+        TAB * pb = pb0;
+        size_t j = 0;
+        for ( ; j+3 <= i; j += 4, pb += 4*db)
+          {
+            auto scal = MatKernelScalAB<1,4>(wa, pa, da, pb, db);
+            auto s1 = func (SIMD<double,4>(pc1+j), get<0>(scal));
+            s1.Store(pc1+j);
+          }
+        for ( ; j <= i; j++, pb += db)
+          {
+            auto scal = MatKernelScalAB<1,1>(wa, pa, da, pb, db);
+            auto s1 = func (pc1[j], get<0>(scal));
+            pc1[j] = s1;
+          }
+      }
+  }
+
+
+  void AddABtSym (SliceMatrix<double> a,
+                  SliceMatrix<double> b,
+                  BareSliceMatrix<double> c)
+  {
+    TAddABt4Sym(a.Width(), a.Height(), b.Height(),
+                &a(0), a.Dist(), &b(0), b.Dist(), &c(0), c.Dist(),
+                [] (auto c, auto ab) { return c+ab; });
+  }
+
+
+  void AddABtSym (SliceMatrix<SIMD<double>> a,
+                  SliceMatrix<SIMD<double>> b,
+                  BareSliceMatrix<double> c)
+  {
+    TAddABt4Sym(a.Width(), a.Height(), b.Height(),
+                &a(0), a.Width(), &b(0), b.Width(), &c(0), c.Dist(),
+                [] (auto c, auto ab) { return c+ab; });
+    /*
+    AddABtSym (SliceMatrix<double> (AFlatMatrix<double>(a)),
+               SliceMatrix<double> (AFlatMatrix<double>(b)), c);
+    */
+  }
+
+
+
+  
+  
+  /* *************************** copied from symbolicintegrator, needs some rework ***** */
+
+
+
+  
+
+  void AddABt (FlatMatrix<SIMD<Complex>> a,
+               FlatMatrix<SIMD<Complex>> b,
+               SliceMatrix<Complex> c)
+  {
+    for (size_t i = 0; i < c.Height(); i++)
+      for (size_t j = 0; j < c.Width(); j++)
+        {
+          SIMD<Complex> sum(0.0);
+          for (size_t k = 0; k < a.Width(); k++)
+            sum += a(i,k) * b(j,k);
+          c(i,j) += HSum(sum);
+        }
+  }
+  
+  void AddABtSym (FlatMatrix<SIMD<Complex>> a,
+                  FlatMatrix<SIMD<Complex>> b,
+                  SliceMatrix<Complex> c)
+  {
+    AddABt (a, b, c);
+  }
+  /*
+  void AddABt (FlatMatrix<SIMD<double>> a,
+               FlatMatrix<SIMD<Complex>> b,
+               SliceMatrix<Complex> c)
+  {
+    size_t i = 0;
+    for ( ; i < c.Height()-1; i+=2)
+      for (size_t j = 0; j < c.Width(); j++)
+        {
+          SIMD<Complex> sum1(0.0);
+          SIMD<Complex> sum2(0.0);
+          for (size_t k = 0; k < a.Width(); k++)
+            {
+              sum1 += a(i,k) * b(j,k);
+              sum2 += a(i+1,k) * b(j,k);
+            }
+          c(i,j) += HSum(sum1);
+          c(i+1,j) += HSum(sum2);
+        }
+    
+    if (i < c.Height())
+      for (size_t j = 0; j < c.Width(); j++)
+        {
+          SIMD<Complex> sum(0.0);
+          for (size_t k = 0; k < a.Width(); k++)
+            sum += a(i,k) * b(j,k);
+          c(i,j) += HSum(sum);
+        }
+  }
+  */
+
+
+      
+  void AddABt1 (SliceMatrix<SIMD<double>> a,
+                SliceMatrix<SIMD<Complex>> b,
+                SliceMatrix<Complex> c)
+  {
+    size_t i = 0;
+    size_t wa = a.Width();
+    size_t da = a.Dist();
+    size_t db = b.Dist();
+    if (wa == 0) return;
+    
+    for ( ; i+1 < c.Height(); i+=2)
+      {
+        auto pa1 = &a(i,0);
+        auto pa2 = pa1 + da;
+        auto pb1 = &b(0,0);
+        size_t j = 0;
+        for ( ; j+1 < c.Width(); j+=2, pb1 += 2*db)
+          // for ( ; j+1 < c.Width(); j+=1, pb1 += db)
+          {
+            auto pb2 = pb1 + db;
+            
+            SIMD<Complex> sum11(0.0);
+            SIMD<Complex> sum21(0.0);
+            SIMD<Complex> sum12(0.0);
+            SIMD<Complex> sum22(0.0);
+            __assume (wa > 0);
+            for (size_t k = 0; k < wa; k++)
+              {
+                sum11 += pa1[k] * pb1[k];
+                sum21 += pa2[k] * pb1[k];
+                sum12 += pa1[k] * pb2[k];
+                sum22 += pa2[k] * pb2[k];
+              }
+
+            Complex s11, s21, s12, s22;
+            std::tie(s11,s21) = HSum(sum11, sum21);
+            std::tie(s12,s22) = HSum(sum12, sum22);
+            c(i,j) += s11;
+            c(i,j+1) += s12;
+            c(i+1,j) += s21;
+            c(i+1,j+1) += s22;
+          }
+        if (j < c.Width())
+          {
+            SIMD<Complex> sum1(0.0);
+            SIMD<Complex> sum2(0.0);
+            __assume (wa > 0);
+            for (size_t k = 0; k < wa; k++)
+              {
+                sum1 += pa1[k] * pb1[k];
+                sum2 += pa2[k] * pb1[k];
+              }
+
+            Complex s1, s2;
+            std::tie(s1,s2) = HSum(sum1, sum2);
+            c(i,j) += s1;
+            c(i+1,j) += s2;
+          }
+      }
+    
+    if (i < c.Height())
+      for (size_t j = 0; j < c.Width(); j++)
+        {
+          SIMD<Complex> sum(0.0);
+          for (size_t k = 0; k < wa; k++)
+            sum += a(i,k) * b(j,k);
+          c(i,j) += HSum(sum);
+        }
+  }
+
+  Timer timer_addabtdc ("AddABt-double-complex");
+  Timer timer_addabtdcsym ("AddABt-double-complex, sym");
+
+  // block and pack B
+  template <size_t K>
+  void AddABt2 (SliceMatrix<SIMD<double>> a,
+                SliceMatrix<SIMD<Complex>> b,
+                SliceMatrix<Complex> c)
+  {
+    constexpr size_t bs = 32;
+    SIMD<Complex> memb[bs*K];
+    // M * K * sizeof(SIMD<Complex>) = 32 * 64 * 64 = 128 KB
+    for (size_t k = 0; k < b.Height(); k+= bs)
+      {
+        size_t k2 = min2(k+bs, b.Height());
+        FlatMatrix<SIMD<Complex>> tempb(k2-k, b.Width(), &memb[0]);
+        tempb = b.Rows(k,k2);
+        AddABt1 (a, tempb, c.Cols(k,k2));
+      }
+  }
+  
+  void AddABt (SliceMatrix<SIMD<double>> a,
+               SliceMatrix<SIMD<Complex>> b,
+               SliceMatrix<Complex> c)
+  {
+    ThreadRegionTimer reg(timer_addabtdc, TaskManager::GetThreadId());
+    NgProfiler::AddThreadFlops(timer_addabtdc, TaskManager::GetThreadId(),
+                               a.Height()*b.Height()*a.Width()*8);
+    constexpr size_t bs = 64;
+    for (size_t k = 0; k < a.Width(); k+=bs)
+      {
+        size_t k2 = min2(k+bs, a.Width());
+        AddABt2<bs> (a.Cols(k,k2), b.Cols(k,k2), c);
+      }
+  }
+
+  
+  
+  void AddABtSym (FlatMatrix<SIMD<double>> a,
+                  FlatMatrix<SIMD<Complex>> b,
+                  SliceMatrix<Complex> c)
+  {
+    size_t ha = a.Height();
+    size_t bs = 192;
+    if (ha > bs)
+      {
+        AddABtSym(a.Rows(0,bs), b.Rows(0,bs), c.Rows(0,bs).Cols(0,bs));
+        AddABt(a.Rows(bs,ha), b.Rows(0,bs), c.Rows(bs,ha).Cols(0,bs));
+        AddABtSym(a.Rows(bs,ha), b.Rows(bs,ha), c.Rows(bs,ha).Cols(bs,ha));
+        return;
+      }
+    
+    bs = 96;
+    if (ha > bs)
+      {
+        AddABtSym(a.Rows(0,bs), b.Rows(0,bs), c.Rows(0,bs).Cols(0,bs));
+        AddABt(a.Rows(bs,ha), b.Rows(0,bs), c.Rows(bs,ha).Cols(0,bs));
+        AddABtSym(a.Rows(bs,ha), b.Rows(bs,ha), c.Rows(bs,ha).Cols(bs,ha));
+        return;
+      }
+
+    bs = 48;
+    if (ha > bs)
+      {
+        AddABtSym(a.Rows(0,bs), b.Rows(0,bs), c.Rows(0,bs).Cols(0,bs));
+        AddABt(a.Rows(bs,ha), b.Rows(0,bs), c.Rows(bs,ha).Cols(0,bs));
+        AddABtSym(a.Rows(bs,ha), b.Rows(bs,ha), c.Rows(bs,ha).Cols(bs,ha));
+        return;
+      }
+    bs = 24;
+    if (ha > bs)
+      {
+        AddABtSym(a.Rows(0,bs), b.Rows(0,bs), c.Rows(0,bs).Cols(0,bs));
+        AddABt(a.Rows(bs,ha), b.Rows(0,bs), c.Rows(bs,ha).Cols(0,bs));
+        AddABtSym(a.Rows(bs,ha), b.Rows(bs,ha), c.Rows(bs,ha).Cols(bs,ha));
+        return;
+      }
+    
+    ThreadRegionTimer reg(timer_addabtdcsym, TaskManager::GetThreadId());
+    NgProfiler::AddThreadFlops(timer_addabtdcsym, TaskManager::GetThreadId(),
+                               a.Height()*b.Height()*a.Width()*8);
+    
+    // AddABt (a, b, c);
+    size_t da = a.Width();
+    size_t db = b.Width();
+    size_t wa = a.Width();
+    // size_t ha = a.Height();
+    size_t hb = b.Height();
+    size_t dc = c.Dist();
+    if (wa == 0) return;
+    
+    size_t i = 0;
+    for ( ; i+1 < ha; i+=2)
+      {
+        auto pa1 = &a(i,0);
+        auto pa2 = pa1 + da;
+        auto pb1 = &b(0,0);
+        auto pc = &c(i,0);
+
+        for (size_t j = 0; j <= i; j+=2, pb1 += 2*db)
+          {
+            auto pb2 = pb1 + db;
+            
+            SIMD<Complex> sum11(0.0);
+            SIMD<Complex> sum21(0.0);
+            SIMD<Complex> sum12(0.0);
+            SIMD<Complex> sum22(0.0);
+
+            __assume (wa > 0);
+            for (size_t k = 0; k < wa; k++)
+              {
+                sum11 += pa1[k] * pb1[k];
+                sum21 += pa2[k] * pb1[k];
+                sum12 += pa1[k] * pb2[k];
+                sum22 += pa2[k] * pb2[k];
+              }
+
+            Complex s11, s21, s12, s22;
+            std::tie(s11,s12) = HSum(sum11, sum12);
+            std::tie(s21,s22) = HSum(sum21, sum22);
+
+            pc[j] += s11;
+            pc[j+1] += s12;            
+            pc[j+dc] += s21;
+            pc[j+dc+1] += s22;            
+          }
+      }
+    
+    if (i < ha)
+      for (size_t j = 0; j < hb; j++)
+        {
+          SIMD<Complex> sum(0.0);
+          for (size_t k = 0; k < wa; k++)
+            sum += a(i,k) * b(j,k);
+          c(i,j) += HSum(sum);
+        }
+  }
+  
+  void AddABt (FlatMatrix<SIMD<double>> a,
+               FlatMatrix<SIMD<double>> b,
+               SliceMatrix<Complex> c)
+  {
+    constexpr size_t M = 92;
+    constexpr size_t N = 64;
+    double mem[M*N];
+    for (size_t i = 0; i < a.Height(); i += M)
+      {
+        size_t i2 = min2(a.Height(), i+M);
+        for (size_t j = 0; j < b.Height(); j += N)
+          {
+            size_t j2 = min2(b.Height(), j+N);
+            FlatMatrix<double> tempc(i2-i, j2-j, &mem[0]);
+            tempc = 0.0;
+            AddABt (a.Rows(i,i2), b.Rows(j,j2), tempc);
+            c.Rows(i,i2).Cols(j,j2) += tempc;
+          }
+      }
+  }
+  
+  void AddABtSym (FlatMatrix<SIMD<double>> a,
+                  FlatMatrix<SIMD<double>> b,
+                  SliceMatrix<Complex> c)
+  {
+    constexpr size_t N = 92;
+    double mem[N*N];
+    for (size_t i = 0; i < a.Height(); i += N)
+      {
+        size_t i2 = min2(a.Height(), i+N);
+        for (size_t j = 0; j < i; j += N)
+          {
+            size_t j2 = min2(b.Height(), j+N);
+            FlatMatrix<double> tempc(i2-i, j2-j, &mem[0]);
+            tempc = 0.0;
+            AddABt (a.Rows(i,i2), b.Rows(j,j2), tempc);
+            c.Rows(i,i2).Cols(j,j2) += tempc;
+          }
+        // j == i
+        FlatMatrix<double> tempc(i2-i, i2-i, &mem[0]);
+        tempc = 0.0;
+        AddABtSym (a.Rows(i,i2), b.Rows(i,i2), tempc);
+        c.Rows(i,i2).Cols(i,i2) += tempc;
+      }
+  }
+  
+  void AddABt (SliceMatrix<double> a,
+               SliceMatrix<double> b,
+               SliceMatrix<Complex> c)
+  {
+    constexpr size_t M = 92;
+    constexpr size_t N = 64;
+    double mem[M*N];
+    for (size_t i = 0; i < a.Height(); i += M)
+      {
+        size_t i2 = min2(a.Height(), i+M);
+        for (size_t j = 0; j < b.Height(); j += N)
+          {
+            size_t j2 = min2(b.Height(), j+N);
+            FlatMatrix<double> tempc(i2-i, j2-j, &mem[0]);
+            tempc = 0.0;
+            AddABt (a.Rows(i,i2), b.Rows(j,j2), tempc);
+            c.Rows(i,i2).Cols(j,j2) += tempc;
+          }
+      }
+  }
+  
+  void AddABtSym (SliceMatrix<double> a,
+                  SliceMatrix<double> b,
+                  SliceMatrix<Complex> c)
+  {
+    constexpr size_t N = 92;
+    double mem[N*N];
+    for (size_t i = 0; i < a.Height(); i += N)
+      {
+        size_t i2 = min2(a.Height(), i+N);
+        for (size_t j = 0; j < i; j += N)
+          {
+            size_t j2 = min2(b.Height(), j+N);
+            FlatMatrix<double> tempc(i2-i, j2-j, &mem[0]);
+            tempc = 0.0;
+            AddABt (a.Rows(i,i2), b.Rows(j,j2), tempc);
+            c.Rows(i,i2).Cols(j,j2) += tempc;
+          }
+        // j == i
+        FlatMatrix<double> tempc(i2-i, i2-i, &mem[0]);
+        tempc = 0.0;
+        AddABtSym (a.Rows(i,i2), b.Rows(i,i2), tempc);
+        c.Rows(i,i2).Cols(i,i2) += tempc;
+      }
+  }
+
+
+  /* ************************** SubAtDB ***************************** */
+
+  static constexpr size_t NA = 128;
+  static constexpr size_t NB = 96;
+  static constexpr size_t NK = 128;
+
+
+  /*
+  void MyTranspose (SliceMatrix<> a, SliceMatrix<> b)
+  {
+    size_t j = 0;
+    size_t ha = a.Height();
+    size_t wa = a.Width();
+    size_t da = a.Dist();
+    size_t db = b.Dist();
+    for ( ; j+4 <= wa; j+=4)
+      {
+        size_t i = 0;
+        for ( ; i+4 <= ha; i+=4)
+          {
+            double * pa = &a(i,j);
+            double * pb = &b(j,i);
+            SIMD<double,4> a0(pa);
+            SIMD<double,4> a1(pa+1*da);
+            SIMD<double,4> a2(pa+2*da);
+            SIMD<double,4> a3(pa+3*da);
+            SIMD<double,4> b0, b1, b2, b3;
+            Transpose(a0,a1,a2,a3, b0,b1,b2,b3);
+            b0.Store(pb);
+            b1.Store(pb+1*db);
+            b2.Store(pb+2*db);
+            b3.Store(pb+3*db);
+          }
+        for ( ; i < ha; i++)
+          {
+            double * pa = &a(i,j);
+            double * pb = &b(j,i);
+            pb[0] = pa[0];
+            pb[db] = pa[1];
+            pb[2*db] = pa[2];
+            pb[3*db] = pa[3];
+          }
+      }
+    for ( ; j < wa; j++)
+      b.Row(j) = a.Col(j);
+  }
+  */
+
+  // scale every row from a .. 
+  void MyTransposeScaleNeg (SliceMatrix<> a, SliceMatrix<> b,
+                            SliceVector<> d)
+  {
+    size_t ha = a.Height();
+    size_t wa = a.Width();
+    size_t da = a.Dist();
+    size_t db = b.Dist();
+    size_t j = 0;
+    for ( ; j+4 <= ha; j+=4)
+      {
+        SIMD<double,4> di(-d(j), -d(j+1), -d(j+2), -d(j+3));
+        size_t i = 0;
+        double * pa = &a(j,0);
+        double * pb = &b(0,j);
+        for ( ; i+4 <= wa; i+=4, pa += 4, pb += 4*db)
+          {
+            SIMD<double,4> a0(pa);
+            SIMD<double,4> a1(pa+1*da);
+            SIMD<double,4> a2(pa+2*da);
+            SIMD<double,4> a3(pa+3*da);
+            SIMD<double,4> b0, b1, b2, b3;
+            SIMDTranspose(a0,a1,a2,a3, b0,b1,b2,b3);
+            (b0*di).Store(pb);
+            (b1*di).Store(pb+1*db);
+            (b2*di).Store(pb+2*db);
+            (b3*di).Store(pb+3*db);
+          }
+        for ( ; i < wa; i++, pa++, pb+=db)
+          {
+            SIMD<double,4> b0(pa[0], pa[1*da], pa[2*da], pa[3*da]);
+            (b0*di).Store(pb);
+          }
+      }
+    for ( ; j < ha; j++)
+      b.Col(j) = (-d(j)) * a.Row(j);
+  }
+
+
+  
+  void SubAtDB_BP (SliceMatrix<double> a,
+                   SliceVector<double> diag,
+                   SliceMatrix<double> b, SliceMatrix<double> c)
+  {
+    constexpr size_t SW = SIMD<double>::Size();
+    alignas (64) double mema[NA*NK];
+    SIMD<double> memb[3*NK];
+    size_t na = a.Width();
+    size_t nb = b.Width();
+    size_t ha = a.Height();
+    
+    // loca = Trans(a);
+    // for (size_t i = 0; i < loca.Width(); i++)
+    // loca.Col(i) *= -diag(i);
+    // c += loca * b;
+    // return;
+
+#ifdef __AVX512F__
+    constexpr size_t HA = 6;
+#else
+    constexpr size_t HA = 4;
+#endif
+
+    size_t da = NA;
+    size_t db = b.Dist();
+    double * pc = &c(0);
+
+    SliceMatrix<> loca(a.Width(), a.Height(), NA, &mema[0]);
+    MyTransposeScaleNeg (a, loca, diag);
+
+    size_t j = 0;
+    for ( ; j+3*SW <= nb; j += 3*SW)
+      {
+        for (size_t i = 0; i < b.Height(); i++)
+          {
+            memb[3*i  ] = SIMD<double>(&b(i,j));
+            memb[3*i+1] = SIMD<double>(&b(i,j+SW));
+            memb[3*i+2] = SIMD<double>(&b(i,j+2*SW));
+          }
+        
+        double * pc =&c(0,j);
+        double * pa = &mema[0];
+        size_t k = 0;
+        for ( ; k+HA <= na; k += HA, pa += HA*da, pc += HA * c.Dist())
+          MatKernelMultAB<HA,3,ADD> (ha, pa, da, &memb[0], 3, pc, c.Dist());
+        switch (na-k) 
+          {
+          case 0: break;
+          case 1: MatKernelMultAB<1,3,ADD> (ha, pa, da, &memb[0], 3, pc, c.Dist()); break;
+          case 2: MatKernelMultAB<2,3,ADD> (ha, pa, da, &memb[0], 3, pc, c.Dist()); break;
+          case 3: MatKernelMultAB<3,3,ADD> (ha, pa, da, &memb[0], 3, pc, c.Dist()); break;
+          case 4:
+            if (HA > 4)
+              MatKernelMultAB<4,3,ADD> (ha, pa, da, &memb[0], 3, pc, c.Dist()); break;
+          case 5:
+            if (HA > 5)
+              MatKernelMultAB<5,3,ADD> (ha, pa, da, &memb[0], 3, pc, c.Dist()); break;
+          default: ;
+          }
+      }
+
+    if (j == nb) return;
+    SliceMatrix<> locb(b.Height(), nb-j, 3*SW, (double*)&memb[0]);
+    locb = b.Cols(j, nb);
+    pc =&c(0,j);
+    double * pa = &mema[0];    
+    size_t k = 0;
+    for ( ; k+HA <= na; k += HA, pa += HA*da, pc += HA * c.Dist())
+      MatKernel2AddAB<HA,ADD> (ha, nb-j, pa, da, &locb(0), 3*SW, pc, c.Dist());
+    switch (na-k) 
+      {
+      case 0: break;
+      case 1: MatKernel2AddAB<1,ADD> (ha, nb-j, pa, da, &locb(0), 3*SW, pc, c.Dist()); break;
+      case 2: MatKernel2AddAB<2,ADD> (ha, nb-j, pa, da, &locb(0), 3*SW, pc, c.Dist()); break;
+      case 3: MatKernel2AddAB<3,ADD> (ha, nb-j, pa, da, &locb(0), 3*SW, pc, c.Dist()); break;
+      case 4:
+        if (HA > 4)
+          MatKernel2AddAB<4,ADD> (ha, nb-j, pa, da, &locb(0), 3*SW, pc, c.Dist()); break;
+      case 5:
+        if (HA > 5)
+          MatKernel2AddAB<5,ADD> (ha, nb-j, pa, da, &locb(0), 3*SW, pc, c.Dist()); break;
+      default: ;
+      }
+
+    /*
+    size_t k = 0;
+    for ( ; k+HA <= na; k += HA, pa += HA*da, pc += HA * c.Dist())
+      MatKernel2AddAB<HA,ADD> (ha, nb, pa, da, &b(0), db, pc, c.Dist());
+    switch (na-k) 
+      {
+      case 0: break;
+      case 1: MatKernel2AddAB<1,ADD> (ha, nb, pa, da, &b(0), db, pc, c.Dist()); break;
+      case 2: MatKernel2AddAB<2,ADD> (ha, nb, pa, da, &b(0), db, pc, c.Dist()); break;
+      case 3: MatKernel2AddAB<3,ADD> (ha, nb, pa, da, &b(0), db, pc, c.Dist()); break;
+      case 4:
+        if (HA > 4)
+          MatKernel2AddAB<4,ADD> (ha, nb, pa, da, &b(0), db, pc, c.Dist()); break;
+      case 5:
+        if (HA > 5)
+          MatKernel2AddAB<5,ADD> (ha, nb, pa, da, &b(0), db, pc, c.Dist()); break;
+      default: ;
+      }
+    */
+  }
+  
+  void SubAtDB_PM (SliceMatrix<double> a,
+                   SliceVector<double> diag,
+                   SliceMatrix<double> b, SliceMatrix<double> c)
+  {
+    for (size_t i = 0; i < a.Height(); i += NK)
+      {
+        size_t i2 = min2(i+NK, a.Height());
+        SubAtDB_BP (a.Rows(i,i2), diag.Range(i,i2), b.Rows(i,i2), c);
+      }
+  }
+  
+  void SubAtDB (SliceMatrix<double> a,
+                SliceVector<double> diag,
+                SliceMatrix<double> b, SliceMatrix<double> c)
+  {
+    for (size_t i = 0; i < a.Width(); i += NA)
+      {
+        size_t i2 = min2(i+NA, a.Width());
+        SubAtDB_PM (a.Cols(i,i2), diag, b, c.Rows(i,i2));
+      }
+  }
+
+
+
+  /**************** timings *********************** */
 
   
   list<tuple<string,double>> Timing (int what, size_t n, size_t m, size_t k)
@@ -516,7 +1095,8 @@ namespace ngbla
           "10 .. C = A * B,   A=n*m, B=m*k, C=n*k\n"
           // "20 .. C = A * B    A=n*m, B=n*k', C=n*k', k'=round(k), B aligned\n"
           "50 .. C += A * B^t,   A=n*k, B=m*k, C=n*m\n"
-          "51 .. C += A * B^t,   A=n*k, B=m*k, C=n*m\n,  A,B aligned"
+          "51 .. C += A * B^t,   A=n*k, B=m*k, C=n*m,  A,B aligned\n"
+          "60 .. C -= A^t * D B,  A=n*k, B=n*m, C = k*m, D=diag\n"
           "100.. MultAddKernel  C += A * B,  A=4*n, B=n*3SW\n"
           "101.. MultAddKernel  C += A * B,  A=4*n, B=n*3SW, B aligned\n"
           "110.. MultAddKernel2  C += A * B,  A=4*n, B=n*m, m multiple of 3*SW\n"
@@ -633,6 +1213,26 @@ namespace ngbla
           t.Stop();
           cout << "AddABt GFlops = " << 1e-9 * tot*its / t.GetTime() << endl;
           timings.push_back(make_tuple("AddABt", 1e-9 * tot *its / t.GetTime()));
+        }
+      }
+
+    if (what == 0 || what == 60)
+      {
+        // C=A*B^t
+        Matrix<> a(n,k), b(n,m), c(k,m);
+        Vector<> d(n);
+        a = 1, b = 1, d = 2;
+        c = 0.0;
+        double tot = n*m*k;
+        int its = 1e10 / tot + 1;
+        {
+          Timer t("C -= A^t*D*B");
+          t.Start();
+          for (int j = 0; j < its; j++)
+            SubAtDB(a, d, b, c);
+          t.Stop();
+          cout << "AddAtDB GFlops = " << 1e-9 * tot*its / t.GetTime() << endl;
+          timings.push_back(make_tuple("AddAtDB", 1e-9 * tot *its / t.GetTime()));
         }
       }
 

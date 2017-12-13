@@ -1719,6 +1719,13 @@ kwargs : For a description of the possible kwargs have a look a bit further down
            },
          docu_string("Gives a proxy to be used as a testfunction for :any:`Symbolic Integrators<symbolic-integrators>`"))
 
+    .def("TnT",
+         [] (const shared_ptr<FESpace> self)
+         {
+           return std::make_tuple(MakeProxyFunction (self, false), MakeProxyFunction (self, true));
+         },
+         docu_string("Gives a tuple of trial and testfunction"))
+
     .def("SolveM",
          [] (const shared_ptr<FESpace> self,
              spCF rho, BaseVector& vec, int heapsize)
@@ -1768,7 +1775,7 @@ kwargs : For a description of the possible kwargs have a look a bit further down
     .def("CreateGradient", [](shared_ptr<HCurlHighOrderFESpace> self) {
 	  auto fesh1 = self->CreateGradientSpace();
 	  shared_ptr<BaseMatrix> grad = self->CreateGradient(*fesh1);
-	  return py::make_tuple(grad, fesh1);
+	  return py::make_tuple(grad, shared_ptr<FESpace>(fesh1));
 	})
     ;
 
@@ -3119,8 +3126,8 @@ flags : dict
 
   m.def("SymbolicLFI",
           [](spCF cf, VorB vb, bool element_boundary,
-              bool skeleton, py::object definedon,
-	      IntegrationRule ir, py::object definedonelem) 
+             bool skeleton, py::object definedon,
+             IntegrationRule ir, int bonus_intorder, py::object definedonelem) 
            {
              py::extract<Region> defon_region(definedon);
              if (defon_region.check())
@@ -3143,7 +3150,7 @@ flags : dict
 
              if (defon_region.check())
                lfi->SetDefinedOn(defon_region().Mask());
-
+             lfi -> SetBonusIntegrationOrder(bonus_intorder);
 	     if (ir.Size())
                {
                  cout << IM(1) << "WARNING: Setting the integration rule for all element types is deprecated, use LFI.SetIntegrationRule(ELEMENT_TYPE, IntegrationRule) instead!" << endl;
@@ -3162,13 +3169,14 @@ flags : dict
            py::arg("skeleton")=false,           
            py::arg("definedon")=DummyArgument(),
 	   py::arg("intrule")=IntegrationRule(),
+           py::arg("bonus_intorder")=0,
            py::arg("definedonelements")=DummyArgument()
           );
 
   m.def("SymbolicBFI",
           [](spCF cf, VorB vb, bool element_boundary,
              bool skeleton, py::object definedon,
-             IntegrationRule ir, py::object definedonelem)
+             IntegrationRule ir, int bonus_intorder, py::object definedonelem)
            {
              py::extract<Region> defon_region(definedon);
              if (defon_region.check())
@@ -3198,7 +3206,7 @@ flags : dict
                  bfi -> SetDefinedOn (defon); 
                }
              // bfi -> SetDefinedOn (makeCArray<int> (definedon));
-
+             bfi -> SetBonusIntegrationOrder(bonus_intorder);
              if (defon_region.check())
                bfi->SetDefinedOn(defon_region().Mask());
 
@@ -3218,6 +3226,7 @@ flags : dict
         py::arg("skeleton")=false,
         py::arg("definedon")=DummyArgument(),
         py::arg("intrule")=IntegrationRule(),
+        py::arg("bonus_intorder")=0,
         py::arg("definedonelements")=DummyArgument()
         );
           
@@ -3264,7 +3273,8 @@ flags : dict
           );
           
   m.def("SymbolicEnergy",
-        [](spCF cf, VorB vb, py::object definedon, bool element_boundary, py::object definedonelem)
+        [](spCF cf, VorB vb, py::object definedon, bool element_boundary,
+           int bonus_intorder, py::object definedonelem)
         -> shared_ptr<BilinearFormIntegrator>
            {
              py::extract<Region> defon_region(definedon);
@@ -3272,7 +3282,7 @@ flags : dict
                vb = VorB(defon_region());
 
              auto bfi = make_shared<SymbolicEnergy> (cf, vb, element_boundary);
-             
+             bfi -> SetBonusIntegrationOrder(bonus_intorder);
              if (defon_region.check())
                {
                  cout << IM(3) << "defineon = " << defon_region().Mask() << endl;
@@ -3284,6 +3294,7 @@ flags : dict
            },
         py::arg("coefficient"), py::arg("VOL_or_BND")=VOL, 
         py::arg("definedon")=DummyArgument(), py::arg("element_boundary")=false,
+        py::arg("bonus_intorder")=0,
         py::arg("definedonelements")=DummyArgument()
           );
 
