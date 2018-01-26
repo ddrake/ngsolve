@@ -152,7 +152,7 @@ namespace ngfem
     }
   }
 
-  static void GetIndex( FlatArray<int> dims, int i, int &iout, int &jout )
+  inline void GetIndex( FlatArray<int> dims, int i, int &iout, int &jout )
   {
     iout = jout = 0;
     switch(dims.Size())
@@ -163,15 +163,21 @@ namespace ngfem
         iout = i;
         break;
       case 2:
-        iout = i/dims[1];
-        jout = i%dims[1];
-        break;
+        {
+          int d1 = dims[1];
+          iout = i/d1;
+          jout = i%d1;
+          break;
+        }
       default:
         throw Exception("GetIndex: too many dimensions!");
     }
   }
 
   unique_ptr<SharedLibrary> CompileCode(const std::vector<string> &codes, const std::vector<string> &libraries );
-
+  namespace detail {
+      string GenerateL2ElementCode(int order);
+  }
+  using detail::GenerateL2ElementCode;
 }
 #endif // FILE_NGS_CODE_GENERATION___
