@@ -262,6 +262,20 @@ struct GenericATan {
   template <typename T> T operator() (T x) const { return atan(x); }
   static string Name() { return "atan"; }
 };
+struct GenericACos {
+  template <typename T> T operator() (T x) const { return acos(x); }
+  // double operator() (double x) const { return acos(x); }
+  // template <typename T> T operator() (T x) const { throw Exception("acos not available"); }
+  SIMD<Complex> operator() (SIMD<Complex> x) const { throw Exception("acos not available for SIMD<complex>"); }
+  static string Name() { return "acos"; }
+};
+struct GenericASin {
+  template <typename T> T operator() (T x) const { return asin(x); }
+  // double operator() (double x) const { return acos(x); }
+  // template <typename T> T operator() (T x) const { throw Exception("acos not available"); }
+  SIMD<Complex> operator() (SIMD<Complex> x) const { throw Exception("asin not available for SIMD<complex>"); }
+  static string Name() { return "asin"; }
+};
 struct GenericSqrt {
   template <typename T> T operator() (T x) const { return sqrt(x); }
   static string Name() { return "sqrt"; }
@@ -566,7 +580,11 @@ val : can be one of the following:
     .def_property("dims",
                   [] (shared_ptr<CF> self) { return Array<int>(self->Dimensions()); } ,
                   [] (shared_ptr<CF> self, py::tuple tup) { self->SetDimensions(makeCArray<int>(tup)); } ,
-                  "shape of CF:  (dim) for vector, (h,w) for matrix")    
+                  "shape of CF:  (dim) for vector, (h,w) for matrix")
+    
+    .def_property_readonly("is_complex",
+                           [] (CF &  self) { return self.IsComplex(); },
+                           "is CoefficientFunction complex-valued ?")
     
     .def("__getitem__",  [](shared_ptr<CF> self, int comp)
                                          {
@@ -736,6 +754,8 @@ val : can be one of the following:
   ExportStdMathFunction<GenericExp>(m, "exp");
   ExportStdMathFunction<GenericLog>(m, "log");
   ExportStdMathFunction<GenericATan>(m, "atan");
+  ExportStdMathFunction<GenericACos>(m, "acos");
+  ExportStdMathFunction<GenericASin>(m, "asin");
   ExportStdMathFunction<GenericSqrt>(m, "sqrt");
   ExportStdMathFunction<GenericFloor>(m, "floor");
   ExportStdMathFunction<GenericCeil>(m, "ceil");

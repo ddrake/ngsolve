@@ -19,7 +19,7 @@ namespace ngstd
    overloaded by using product-rule etc. etc.
 **/
 template <int D, typename SCAL = double>
-class AutoDiffDiff
+class AutoDiffDiff : public AlignedAlloc<AutoDiffDiff<D,SCAL>>
 {
   SCAL val;
   SCAL dval[D?D:1];
@@ -537,6 +537,48 @@ INLINE AutoDiffDiff<D, SCAL> atan (AutoDiffDiff<D, SCAL> x)
   return res;
 }
 
+
+
+using std::acos;
+template <int D, typename SCAL>
+INLINE AutoDiffDiff<D,SCAL> acos (AutoDiffDiff<D,SCAL> x)
+{
+  AutoDiffDiff<D,SCAL> res;
+  SCAL a = acos(x.Value());
+  res.Value() = a;
+  auto omaa = 1-x.Value()*x.Value();
+  auto s = sqrt(omaa);
+  SCAL da = -1 / s;
+  SCAL dda = -x.Value() / (s*omaa);
+  for (int k = 0; k < D; k++)
+    res.DValue(k) = x.DValue(k)*da;
+  for (int k = 0; k < D; k++)
+    for (int l = 0; l < D; l++)
+      res.DDValue(k,l) = dda * x.DValue(k) * x.DValue(l) + da * x.DDValue(k,l);
+  
+  return res;
+}
+
+
+using std::acos;
+template <int D, typename SCAL>
+INLINE AutoDiffDiff<D,SCAL> asin (AutoDiffDiff<D,SCAL> x)
+{
+  AutoDiffDiff<D,SCAL> res;
+  SCAL a = asin(x.Value());
+  res.Value() = a;
+  auto omaa = 1-x.Value()*x.Value();
+  auto s = sqrt(omaa);
+  SCAL da = 1 / s;
+  SCAL dda = x.Value() / (s*omaa);
+  for (int k = 0; k < D; k++)
+    res.DValue(k) = x.DValue(k)*da;
+  for (int k = 0; k < D; k++)
+    for (int l = 0; l < D; l++)
+      res.DDValue(k,l) = dda * x.DValue(k) * x.DValue(l) + da * x.DDValue(k,l);
+  
+  return res;
+}
 
 
 using std::floor;
