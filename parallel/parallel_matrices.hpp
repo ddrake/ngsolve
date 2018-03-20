@@ -1,4 +1,3 @@
-
 #ifndef FILE_NGS_PARALLEL_MATRICES
 #define FILE_NGS_PARALLEL_MATRICES
 
@@ -22,16 +21,16 @@ namespace ngla
     DynamicTable<int> loc2glob;
     Array<int> select;
     string invtype;
-    const ParallelDofs * pardofs;
+    //shared_ptr<ParallelDofs> pardofs;
   public:
     MasterInverse (const SparseMatrixTM<TM> & mat, shared_ptr<BitArray> asubset, 
-		   const ParallelDofs * apardofs);
+		   shared_ptr<ParallelDofs> apardofs);
     virtual ~MasterInverse ();
     virtual bool IsComplex() const { return inv->IsComplex(); } 
     virtual void MultAdd (double s, const BaseVector & x, BaseVector & y) const;
 
-    virtual int VHeight() const { return pardofs->GetNDofLocal(); }
-    virtual int VWidth() const { return pardofs->GetNDofLocal(); }
+    virtual int VHeight() const { return paralleldofs->GetNDofLocal(); }
+    virtual int VWidth() const { return paralleldofs->GetNDofLocal(); }
   };
 
 
@@ -40,7 +39,7 @@ namespace ngla
     shared_ptr<BaseMatrix> mat;
     // const ParallelDofs & pardofs;
   public:
-    ParallelMatrix (shared_ptr<BaseMatrix> amat, const ParallelDofs * apardofs);
+    ParallelMatrix (shared_ptr<BaseMatrix> amat, shared_ptr<ParallelDofs> apardofs);
     // : mat(*amat), pardofs(*apardofs) 
     // {const_cast<BaseMatrix&>(mat).SetParallelDofs (apardofs);}
 
@@ -52,7 +51,7 @@ namespace ngla
     virtual BaseVector & AsVector() { return mat->AsVector(); }
     virtual const BaseVector & AsVector() const { return mat->AsVector(); }
 
-    BaseMatrix & GetMatrix() const { return const_cast<BaseMatrix&> (*mat); }
+    shared_ptr<BaseMatrix> GetMatrix() const { return mat; }
     virtual shared_ptr<BaseMatrix> CreateMatrix () const;
     virtual AutoVector CreateVector () const;
 
@@ -75,6 +74,23 @@ namespace ngla
   };
 
   
+  class FETI_Jump_Matrix : public BaseMatrix
+  {
+  public:
+    FETI_Jump_Matrix (shared_ptr<ParallelDofs> pardofs);
+
+    virtual bool IsComplex() const override { return false; }
+    virtual void MultAdd (double s, const BaseVector & x, BaseVector & y) const override;
+    virtual void MultTransAdd (double s, const BaseVector & x, BaseVector & y) const override;
+
+    virtual AutoVector CreateRowVector () const override;
+    virtual AutoVector CreateColVector () const override;
+
+  protected:
+
+    shared_ptr<ParallelDofs> jump_paralleldofs;
+    
+  };
 
 #endif
 }

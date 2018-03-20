@@ -290,7 +290,7 @@ lot of new non-zero entries in the matrix!\n" << endl;
     delete dummy_segm;
     delete dummy_point;
 
-    delete paralleldofs;
+    // delete paralleldofs;
   }
   
   void FESpace :: SetNDof (size_t _ndof)
@@ -1547,25 +1547,26 @@ lot of new non-zero entries in the matrix!\n" << endl;
 
   void FESpace :: UpdateParallelDofs ( )
   {
-    if (MyMPI_GetNTasks() == 1) return;
+    if (MyMPI_GetNTasks(ma->GetCommunicator()) == 1) return;
+
+    static Timer timer ("FESpace::UpdateParallelDofs"); RegionTimer reg(timer);
 
     Array<NodeId> dofnodes (GetNDof());
     dofnodes = NodeId (NT_VERTEX, -1);
+    
     Array<int> dnums;
-
-    // for (NODE_TYPE nt = NT_VERTEX; nt <= NT_CELL; nt++)
     for (NODE_TYPE nt : { NT_VERTEX, NT_EDGE, NT_FACE, NT_CELL })
-      for ( int nr = 0; nr < ma->GetNNodes (nt); nr++ )
+      for (NodeId ni : ma->Nodes(nt))
 	{
-	  GetDofNrs (NodeId(nt, nr), dnums);
+	  GetDofNrs (ni, dnums);
 	  for (auto d : dnums)
-	    dofnodes[d] = NodeId (nt, nr);
+	    if (d != -1) dofnodes[d] = ni;
 	} 
 
-    paralleldofs = new ParallelMeshDofs (ma, dofnodes, dimension, iscomplex);
+    paralleldofs = make_shared<ParallelMeshDofs> (ma, dofnodes, dimension, iscomplex);
 
-    if (MyMPI_AllReduce (ctofdof.Size(), MPI_SUM))
-      AllReduceDofData (ctofdof, MPI_MAX, GetParallelDofs());
+    if (MyMPI_AllReduce (ctofdof.Size(), MPI_SUM, ma->GetCommunicator())) 
+      paralleldofs -> AllReduceDofData (ctofdof, MPI_MAX);
   }
 
 
@@ -2676,8 +2677,8 @@ lot of new non-zero entries in the matrix!\n" << endl;
 
 
 
-  Table<int> * Nodes2Table (const MeshAccess & ma,
-			    const Array<NodeId> & dofnodes)
+  Table<int> Nodes2Table (const MeshAccess & ma,
+                          const Array<NodeId> & dofnodes)
   {
     int ndof = dofnodes.Size();
 
@@ -2690,14 +2691,14 @@ lot of new non-zero entries in the matrix!\n" << endl;
 	ma.GetDistantProcs (dofnodes[i], distprocs);
 	ndistprocs[i] = distprocs.Size();
       }
-
-    Table<int> * dist_procs = new Table<int> (ndistprocs);
+    
+    Table<int> dist_procs(ndistprocs);
 
     for (int i = 0; i < ndof; i++)
       {
 	if (dofnodes[i].GetNr() == -1) continue;
 	ma.GetDistantProcs (dofnodes[i], distprocs);
-	(*dist_procs)[i] = distprocs;
+	dist_procs[i] = distprocs;
       }
 
     return dist_procs;
