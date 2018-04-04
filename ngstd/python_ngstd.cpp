@@ -145,20 +145,6 @@ const char* docu_string(const char* str)
 void NGS_DLL_HEADER  ExportNgstd(py::module & m) {
 
   
-  m.def("GlobalSum", [] (double x) { return MyMPI_AllReduce(x); });
-  /** Complex + complex mpi_traits is in bla.hpp;  mympi_allreduce doesn't find it **/
-  m.def("GlobalSum", [] (Complex x) { 
-#ifdef PARALLEL
-      Complex global_d;
-      MPI_Allreduce (&x, &global_d, 1, MPI_DOUBLE_COMPLEX, MPI_SUM, ngs_comm);
-      return global_d;
-#else
-      return x;
-#endif
-    });
-  m.def("GlobalSum", [] (int x) { return MyMPI_AllReduce(x); });
-  m.def("GlobalSum", [] (size_t x) { return MyMPI_AllReduce(x); });
-
   std::string nested_name = "ngstd";
 
   m.def("TestFlags", [] (py::dict const &d) { cout << py::extract<Flags>(d)() << endl; } );
@@ -313,11 +299,19 @@ void NGS_DLL_HEADER  ExportNgstd(py::module & m) {
   py::class_<Flags>(m, "Flags")
     .def(py::init<>())
     .def("__str__", &ToString<Flags>)
+    .def(py::init([](py::object & obj) {
+          Flags flags;
+          py::dict d(obj);          
+          SetFlag (flags, "", d);
+          return move(flags);
+        }))
+    /*
     .def("__init__", [] (Flags &f, py::object & obj) {
          py::dict d(obj);
          new (&f) Flags();
          SetFlag(f, "", d);
      })
+    */
     .def("__getstate__", [] (py::object self_object) {
         auto self = self_object.cast<Flags>();
         stringstream str;
@@ -396,6 +390,7 @@ void NGS_DLL_HEADER  ExportNgstd(py::module & m) {
 	   );
 
   py::class_<Archive, shared_ptr<Archive>> (m, "Archive")
+      /*
     .def("__init__", [](const string & filename, bool write,
                               bool binary) -> shared_ptr<Archive>
                            {
@@ -412,7 +407,23 @@ void NGS_DLL_HEADER  ExportNgstd(py::module & m) {
                                   return make_shared<TextInArchive> (filename);
                               }
                            })
-
+      */
+      .def(py::init<> ([](const string & filename, bool write,
+                          bool binary) -> shared_ptr<Archive>
+                       {
+                         if(binary) {
+                           if (write)
+                             return make_shared<BinaryOutArchive> (filename);
+                           else
+                             return make_shared<BinaryInArchive> (filename);
+                         }
+                         else {
+                           if (write)
+                             return make_shared<TextOutArchive> (filename);
+                           else
+                             return make_shared<TextInArchive> (filename);
+                         }
+                       }))
     .def("__and__" , [](shared_ptr<Archive> & self, Array<int> & a) 
                                          { cout << "output array" << endl;
                                            *self & a; return self; })
@@ -476,6 +487,16 @@ void NGS_DLL_HEADER  ExportNgstd(py::module & m) {
   py::class_<PyMPI_Comm> (m, "MPI_Comm")
     .def_property_readonly ("rank", [](PyMPI_Comm c) { return MyMPI_GetId(c.comm); })
     .def_property_readonly ("size", [](PyMPI_Comm c) { return MyMPI_GetNTasks(c.comm); })
+    .def("Barrier", [](PyMPI_Comm c) { MyMPI_Barrier(c.comm); })
+    .def("Sum", [](PyMPI_Comm c, double x) { return MyMPI_AllReduce(x, MPI_SUM, c.comm); })
+    .def("Min", [](PyMPI_Comm c, double x) { return MyMPI_AllReduce(x, MPI_MIN, c.comm); })
+    .def("Max", [](PyMPI_Comm c, double x) { return MyMPI_AllReduce(x, MPI_MAX, c.comm); })
+    .def("Sum", [](PyMPI_Comm c, int x) { return MyMPI_AllReduce(x, MPI_SUM, c.comm); })
+    .def("Min", [](PyMPI_Comm c, int x) { return MyMPI_AllReduce(x, MPI_MIN, c.comm); })
+    .def("Max", [](PyMPI_Comm c, int x) { return MyMPI_AllReduce(x, MPI_MAX, c.comm); })
+    .def("Sum", [](PyMPI_Comm c, size_t x) { return MyMPI_AllReduce(x, MPI_SUM, c.comm); })
+    .def("Min", [](PyMPI_Comm c, size_t x) { return MyMPI_AllReduce(x, MPI_MIN, c.comm); })
+    .def("Max", [](PyMPI_Comm c, size_t x) { return MyMPI_AllReduce(x, MPI_MAX, c.comm); })
     ;
 
   
@@ -486,7 +507,6 @@ void NGS_DLL_HEADER  ExportNgstd(py::module & m) {
           typedef const char * pchar;
           pchar ptrs[2] = { progname, nullptr };
           pchar * pptr = &ptrs[0];
-          int argc2 = 1;
           
           static MyMPI mympi(1, (char**)pptr);
           return PyMPI_Comm(ngs_comm);
