@@ -1724,9 +1724,9 @@ kwargs : For a description of the possible kwargs have a look a bit further down
 
     .def("SolveM",
          [] (const shared_ptr<FESpace> self,
-             spCF rho, BaseVector& vec)
-          { self->SolveM(*rho, vec, glh); },
-         py::arg("rho"), py::arg("vec"))
+             BaseVector& vec, spCF rho)
+         { self->SolveM(rho.get(), vec, glh); },
+         py::arg("vec"), py::arg("rho")=nullptr)
         
     .def("__eq__",
          [] (shared_ptr<FESpace> self, shared_ptr<FESpace> other)
@@ -2413,7 +2413,8 @@ used_idnrs : list of int = None
           {
             auto sp = make_shared<GridFunctionCoefficientFunction> (self,
                                                                     self->GetFESpace()->GetFluxEvaluator(),
-                                                                    self->GetFESpace()->GetFluxEvaluator(BND));
+                                                                    self->GetFESpace()->GetFluxEvaluator(BND),
+								    self->GetFESpace()->GetFluxEvaluator(BBND));
             // sp->SetDimensions(sp->Dimensions());
             return sp;
           })

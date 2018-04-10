@@ -228,13 +228,14 @@ namespace ngcomp
     order_facet = p;
 
     fine_facet.SetSize(nfa);
-    fine_facet = 0; 
+    fine_facet = false; 
     
     Array<int> fanums;
         
     for (int i = 0; i < nel; i++)
       {
         ElementId ei(VOL, i);
+        if (!DefinedOn(ei)) continue;
 	ELEMENT_TYPE eltype=ma->GetElType(ei); 
 	const POINT3D * points = ElementTopology :: GetVertices (eltype);	
 	
@@ -439,12 +440,17 @@ namespace ngcomp
     fine_facet = false;
     
     if(ma->GetDimension() == 3)
-      for(ElementId ei : ma->Elements<VOL>())
-				fine_facet[(*ma)[ei].Faces()] = true;
+      {
+        for(ElementId ei : ma->Elements<VOL>())
+          if (DefinedOn(ei))
+            fine_facet[(*ma)[ei].Faces()] = true;
+      }
     else
-      for(ElementId ei : ma->Elements<VOL>())
-        fine_facet[(*ma)[ei].Edges()] = true;
-    
+      {
+        for(ElementId ei : ma->Elements<VOL>())
+          if (DefinedOn(ei))
+            fine_facet[(*ma)[ei].Edges()] = true;
+      }
     if (!AllDofsTogether())
       {
         for(int facet = 0; facet < ma->GetNFacets(); facet++)
@@ -495,6 +501,16 @@ namespace ngcomp
   // ------------------------------------------------------------------------
   FiniteElement & FacetFESpace :: GetFE (ElementId ei, Allocator  & lh) const
   {
+    if (!DefinedOn (ei))
+      {
+        return
+          SwitchET (ma->GetElType(ei), [&] (auto et) -> FiniteElement&
+                      {
+                        return *new (lh) ScalarDummyFE<et.ElementType()> ();
+                      });
+      }
+    
+    
     switch(ei.VB())
       {
       case VOL:
@@ -688,12 +704,14 @@ namespace ngcomp
   // ------------------------------------------------------------------------
   void FacetFESpace :: GetDofNrs (ElementId ei, Array<int> & dnums) const
   {
+    dnums.SetSize0();
+    if (!DefinedOn (ei)) return;
+    
     switch (ei.VB())
       {
       case VOL:
 	{
 	  auto fanums = ma->GetElFacets(ei);
-	  dnums.SetSize0();
 	  
 	  if(!highest_order_dc)
 	    {
