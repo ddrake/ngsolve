@@ -291,15 +291,16 @@ namespace ngcomp
 
   FiniteElement & L2HighOrderFESpace :: GetFE (ElementId ei, Allocator & alloc) const
   {
+    Ngs_Element ngel = ma->GetElement(ei);
+    ELEMENT_TYPE eltype = ngel.GetType();
+
     if (ei.IsVolume())
       {
         int elnr = ei.Nr();
-        Ngs_Element ngel = ma->GetElement(ei);
-        ELEMENT_TYPE eltype = ngel.GetType();
         
-        // if (!DefinedOn (ma->GetElIndex (elnr)))
         if (!DefinedOn (ngel))
           {
+            /*
             switch (eltype)
               {
               case ET_POINT:   return * new (alloc) ScalarDummyFE<ET_POINT> (); break;
@@ -311,23 +312,32 @@ namespace ngcomp
               case ET_PRISM:   return * new (alloc) ScalarDummyFE<ET_PRISM> (); break;
               case ET_HEX:     return * new (alloc) ScalarDummyFE<ET_HEX> (); break;
               }
+            */
+            return SwitchET(eltype,
+                            [&alloc] (auto et) -> FiniteElement&
+                            { return *new(alloc) ScalarDummyFE<et.ElementType()>(); });
           }
 
 	if (eltype == ET_TRIG) 
-	  {
-            /*
-            int ia[3];
-            FlatArray<int> vnums(3, &ia[0]);
-            vnums = ngel.Vertices();
-            */
-            // INT<3> vnums = ngel.Vertices();
-	    // return *CreateL2HighOrderFE<ET_TRIG> (order, vnums, alloc);
-            return *CreateL2HighOrderFE<ET_TRIG> (order, INT<3>(ngel.Vertices()), alloc);
-	  }
+          return *CreateL2HighOrderFE<ET_TRIG> (order, INT<3>(ngel.Vertices()), alloc);
 
         if (eltype == ET_TET)         
           return *CreateL2HighOrderFE<ET_TET> (order, INT<4>(ngel.Vertices()), alloc);
-            
+
+        /*
+        return SwitchET(eltype,
+                        [this,elnr,&alloc] (auto et) -> FiniteElement&
+                        {
+                        // return T_GetFE<et.ElementType()>(elnr, alloc);
+                          // Ngs_Element ngel = ma->GetElement<ET_trait<ET>::DIM,VOL>(elnr);
+                          auto * hofe =  new (alloc) L2HighOrderFE<et.ElementType()> ();
+                          hofe -> SetVertexNumbers (ngel.vertices);
+                          hofe -> L2HighOrderFE<et.ElementType()>::SetOrder (order_inner[ngel.Nr()]);
+                          hofe -> L2HighOrderFE<et.ElementType()>::ComputeNDof();
+                          return *hofe;
+                        });
+        */
+
         switch (eltype)
           {
           case ET_SEGM:    return T_GetFE<ET_SEGM> (elnr, alloc);
@@ -346,7 +356,19 @@ namespace ngcomp
       }
     else
       {
-        switch (ma->GetElType(ei))
+        try
+          {
+            return SwitchET<ET_POINT,ET_SEGM,ET_TRIG,ET_QUAD>
+              (eltype,
+               [&alloc] (auto et) -> FiniteElement&
+               { return * new (alloc) DummyFE<et.ElementType()>; });
+          }
+        catch (Exception e)
+          {
+            throw Exception("illegal element type in L2::GetSurfaceFE");
+          }
+        /*
+        switch (eltype)
           {
           case ET_POINT: return *new (alloc) DummyFE<ET_POINT>; 
           case ET_SEGM:  return *new (alloc) DummyFE<ET_SEGM>;
@@ -360,6 +382,7 @@ namespace ngcomp
                 << ", order = " << order << endl;
             throw Exception (str.str());
           }
+        */
       }
   }
 
@@ -938,6 +961,75 @@ namespace ngcomp
 
 
 
+  
+
+  template <int DIM_SPC, VorB VB = VOL>
+  class DiffOpIdVectorL2Piola : public DiffOp<DiffOpIdVectorL2Piola<DIM_SPC> >
+  {
+  public:
+    enum { DIM = 1 };
+    enum { DIM_SPACE = DIM_SPC };
+    enum { DIM_ELEMENT = DIM_SPC-VB };
+    enum { DIM_DMAT = DIM_SPC };
+    enum { DIFFORDER = 0 };
+
+    template <typename FEL, typename MIP, typename MAT>
+    static void GenerateMatrix (const FEL & bfel, const MIP & mip,
+                                MAT & mat, LocalHeap & lh)
+    {
+      auto & fel = static_cast<const CompoundFiniteElement&> (bfel);
+      mat = 0.0;
+      auto & feli = static_cast<const BaseScalarFiniteElement&> (fel[0]);
+      for (int i = 0; i < DIM_SPC; i++)
+        feli.CalcShape (mip.IP(), mat.Row(i).Range(fel.GetRange(i)));
+      Mat<DIM_SPACE> trafo = (1.0/mip.GetJacobiDet()) * mip.GetJacobian();
+      for (int i = 0; i < DIM_SPACE*feli.GetNDof(); i++)
+        {
+          Vec<DIM_SPACE> hv = mat.Col(i);
+          mat.Col(i) = trafo * hv;
+        } 
+    }
+    /*
+    static void GenerateMatrixSIMDIR (const FiniteElement & bfel,
+                                      const SIMD_BaseMappedIntegrationRule & mir,
+                                      BareSliceMatrix<SIMD<double>> mat)
+    {
+      auto & fel = static_cast<const CompoundFiniteElement&> (bfel);
+      mat.AddSize(DIM_SPC*bfel.GetNDof(), mir.Size()) = 0.0;
+      for (int i = 0; i < DIM_SPC; i++)
+        {
+          auto & feli = static_cast<const BaseScalarFiniteElement&> (fel[i]);
+          feli.CalcShape (mir.IR(), mat.Rows(DIM_SPC*fel.GetRange(i)).RowSlice(i, DIM_SPC));
+        }
+    }
+
+    using DiffOp<DiffOpIdVectorH1<DIM_SPC>>::ApplySIMDIR;    
+    static void ApplySIMDIR (const FiniteElement & bfel, const SIMD_BaseMappedIntegrationRule & mir,
+                             BareSliceVector<double> x, BareSliceMatrix<SIMD<double>> y)
+    {
+      auto & fel = static_cast<const CompoundFiniteElement&> (bfel);
+      for (int i = 0; i < DIM_SPC; i++)
+        {
+          auto & feli = static_cast<const BaseScalarFiniteElement&> (fel[i]);
+          feli.Evaluate (mir.IR(), x.Range(fel.GetRange(i)), y.Row(i));
+        }
+    }
+
+    using DiffOp<DiffOpIdVectorH1<DIM_SPC>>::AddTransSIMDIR;        
+    static void AddTransSIMDIR (const FiniteElement & bfel, const SIMD_BaseMappedIntegrationRule & mir,
+                                BareSliceMatrix<SIMD<double>> y, BareSliceVector<double> x)
+    {
+      auto & fel = static_cast<const CompoundFiniteElement&> (bfel);
+      for (int i = 0; i < DIM_SPC; i++)
+        {
+          auto & feli = static_cast<const BaseScalarFiniteElement&> (fel[i]);
+          feli.AddTrans (mir.IR(), y.Row(i), x.Range(fel.GetRange(i)));
+        }
+    }    
+    */
+  };
+
+
 
 
   VectorL2FESpace::VectorL2FESpace (shared_ptr<MeshAccess> ama, const Flags & flags, 
@@ -945,24 +1037,174 @@ namespace ngcomp
       : CompoundFESpace(ama, flags)
     {
       type = "VectorL2";
+      Flags compflags = flags;
+      compflags.SetFlag("all_dofs_together");
       for (int i = 0; i <  ma->GetDimension(); i++)
-        AddSpace (make_shared<L2HighOrderFESpace> (ama, flags));
+        AddSpace (make_shared<L2HighOrderFESpace> (ama, compflags));
 
-      switch (ma->GetDimension())
+      piola = flags.GetDefineFlag ("piola");
+      covariant = flags.GetDefineFlag ("covariant");
+
+      if (piola)
         {
-        case 2:
-          evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorH1<2>>>();
-          flux_evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpGradVectorH1<2>>>();
-          additional_evaluators.Set ("div", make_shared<T_DifferentialOperator<DiffOpDivVectorH1<2>>> ());
-          break;
-        case 3:
-          evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorH1<3>>>();
-          flux_evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpGradVectorH1<3>>>();
-          additional_evaluators.Set ("div", make_shared<T_DifferentialOperator<DiffOpDivVectorH1<3>>> ());
-          break;
+          switch (ma->GetDimension())
+            {
+            case 2:
+              evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorL2Piola<2>>>();
+              break;
+            case 3:
+              evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorL2Piola<3>>>();
+              break;
+            }
         }
+      else
+        switch (ma->GetDimension())
+          {
+          case 2:
+            evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorH1<2>>>();
+            flux_evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpGradVectorH1<2>>>();
+            additional_evaluators.Set ("div", make_shared<T_DifferentialOperator<DiffOpDivVectorH1<2>>> ());
+            break;
+          case 3:
+            evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpIdVectorH1<3>>>();
+            flux_evaluator[VOL] = make_shared<T_DifferentialOperator<DiffOpGradVectorH1<3>>>();
+            additional_evaluators.Set ("div", make_shared<T_DifferentialOperator<DiffOpDivVectorH1<3>>> ());
+            break;
+          }
     }
 
+
+  void VectorL2FESpace :: GetDofNrs (ElementId ei, Array<int> & dnums) const
+  {
+    dnums.SetSize0();
+    if (!DefinedOn (ei) || ei.VB() != VOL) return;
+    auto & fes1 = static_cast<const L2HighOrderFESpace&> (*spaces[0]);
+    auto eldofs = fes1.GetElementDofs(ei.Nr());
+    size_t ndof1 = fes1.GetNDof();
+    size_t locndof1 = eldofs.Size();
+    dnums.SetSize (locndof1 * spaces.Size());
+    for (size_t j = 0; j < spaces.Size(); j++)
+      dnums.Range(j*locndof1, (j+1)*locndof1) = eldofs + j*ndof1;
+    /*
+    size_t size = eldofs.Size();
+    size_t base = all_dofs_together ? 0 : 1;
+    size += base;
+    dnums.SetSize(size);
+    if (!all_dofs_together) dnums[0] = ei.Nr();
+    dnums.Range(base, size) = eldofs;
+    */
+  }
+
+
+
+  
+  void VectorL2FESpace :: SolveM (CoefficientFunction * rho, BaseVector & vec,
+                                  LocalHeap & lh) const
+  {
+    if (piola)
+      {
+        switch (ma->GetDimension())
+          {
+          case 1: SolveMPiola<1>(rho, vec, lh); break;
+          case 2: SolveMPiola<2>(rho, vec, lh); break;
+          case 3: SolveMPiola<3>(rho, vec, lh); break;
+          default: throw Exception("VectorL2FESpace::SolveM: illegal dimension");
+          }
+        return;
+      }
+    
+    for (size_t i = 0; i < spaces.Size(); i++)
+      {
+        auto veci = vec.Range (GetRange(i));
+        spaces[i] -> SolveM (rho, veci, lh);
+      }
+  }
+
+
+
+
+
+  template <int DIM>
+  void VectorL2FESpace ::
+  SolveMPiola (CoefficientFunction * rho, BaseVector & vec,
+               LocalHeap & lh) const
+  {
+    static Timer t("SolveM - Piola"); RegionTimer reg(t);
+        
+    IterateElements
+      (*this, VOL, lh,
+       [&rho, &vec,this] (FESpace::Element el, LocalHeap & lh)
+       {
+         auto & fel = static_cast<const CompoundFiniteElement&>(el.GetFE());
+         auto & feli = static_cast<const BaseScalarFiniteElement&>(fel[0]);
+         const ElementTransformation & trafo = el.GetTrafo();
+         
+         Array<int> dnums(fel.GetNDof(), lh);
+         GetDofNrs (el.Nr(), dnums);
+         
+         FlatVector<double> elx(feli.GetNDof()*DIM, lh);
+         vec.GetIndirect(dnums, elx);
+         auto melx = elx.AsMatrix(DIM, feli.GetNDof());
+         
+         FlatVector<double> diag_mass(feli.GetNDof(), lh);
+         feli.GetDiagMassMatrix (diag_mass);
+         
+         bool curved = trafo.IsCurvedElement();
+         if (rho && !rho->ElementwiseConstant()) curved = true;
+         curved = false;  // curved not implemented
+         
+         if (!curved)
+           {
+             IntegrationRule ir(fel.ElementType(), 0);
+             BaseMappedIntegrationRule & mir = trafo(ir, lh);
+             Mat<DIM> trans = (1/mir[0].GetMeasure()) * Trans(mir[0].GetJacobian()) * mir[0].GetJacobian();
+             Mat<DIM> invtrans = Inv(trans);
+             
+             // double jac = mir[0].GetMeasure();
+             // if (rho) jac *= rho->Evaluate(mir[0]);
+             // diag_mass *= jac;
+             
+             for (int i = 0; i < melx.Width(); i++)
+               {
+                 Vec<DIM> hv = melx.Col(i);
+                 hv /=  diag_mass(i);
+                 melx.Col(i) = invtrans * hv;
+               }
+           }
+         /*
+           else
+           {
+           SIMD_IntegrationRule ir(fel.ElementType(), 2*fel.Order());
+           auto & mir = trafo(ir, lh);
+           FlatVector<SIMD<double>> pntvals(ir.Size(), lh);
+           FlatMatrix<SIMD<double>> rhovals(1, ir.Size(), lh);
+           if (rho) rho->Evaluate (mir, rhovals);
+                 
+           for (int i = 0; i < melx.Height(); i++)
+           melx.Row(i) /= diag_mass(i);
+           for (int comp = 0; comp < dimension; comp++)
+           {
+           fel.Evaluate (ir, melx.Col(comp), pntvals);
+           if (rho)
+           for (size_t i = 0; i < ir.Size(); i++)
+           pntvals(i) *= ir[i].Weight() / (mir[i].GetMeasure() * rhovals(0,i));
+           else
+           for (size_t i = 0; i < ir.Size(); i++)
+           pntvals(i) *= ir[i].Weight() / mir[i].GetMeasure();
+           
+           melx.Col(comp) = 0.0;
+           fel.AddTrans (ir, pntvals, melx.Col(comp));
+           }
+           for (int i = 0; i < melx.Height(); i++)
+           melx.Row(i) /= diag_mass(i);
+           }
+         */
+         vec.SetIndirect(dnums, elx);
+       });
+  }
+
+
+  
   static RegisterFESpace<VectorL2FESpace> initvecl2 ("VectorL2");
   
 

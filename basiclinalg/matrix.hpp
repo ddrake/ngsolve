@@ -1669,7 +1669,15 @@ namespace ngbla
     INLINE size_t Dist () const throw() { return dist; }
 
     SliceMatrix<T> AddSize (size_t h, size_t w) const
-    { return SliceMatrix<T> (h, w, dist, data); } 
+    {
+#ifdef DEBUG
+      if(Height() != h  || Width() != w)
+        throw Exception(string("BareSliceMatrix::AddSize dimensions do not fit, mysize = ")
+                        +ToString(Height()) + "x" + ToString(Width()) +
+                        " new size = " + ToString(h) + " x " + ToString(w));
+#endif
+      return SliceMatrix<T> (h, w, dist, data);
+    }
     
     INLINE const BareSliceMatrix Rows (size_t first, size_t next) const
     {
@@ -1778,7 +1786,13 @@ namespace ngbla
     INLINE size_t Dist () const throw() { return dist; }
 
     SliceMatrix<T,ColMajor> AddSize (size_t h, size_t w) const
-    { return SliceMatrix<T,ColMajor> (h, w, dist, data); } 
+    {
+#ifdef DEBUG
+      if(Height() != h  || Width() != w)
+        throw Exception("BareSliceMatrix::AddSize dimensions do not fit");
+#endif
+      return SliceMatrix<T,ColMajor> (h, w, dist, data);
+    }
     
     INLINE const BareSliceMatrix Rows (size_t first, size_t next) const
     {
