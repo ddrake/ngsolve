@@ -14,6 +14,34 @@ namespace ngfem
   /** 
       coefficient functions
   */
+
+  typedef enum {
+    CF_Type_undefined,
+    CF_Type_constant,
+    CF_Type_vectorial,
+    CF_Type_coordinate,
+    CF_Type_norm,
+    CF_Type_trans,
+    CF_Type_component,
+    CF_Type_real,
+    CF_Type_imag,
+    CF_Type_ifpos,
+    CF_Type_normal_vector,
+    CF_Type_tangential_vector,
+    CF_Type_mesh_size,
+    CF_Type_scale,
+    CF_Type_scale_complex,
+    CF_Type_add,    
+    CF_Type_sub,    
+    CF_Type_mult,    
+    CF_Type_div,    
+    CF_Type_domainconst,    
+    CF_Type_domainwise,    
+    CF_Type_unary_op,
+    CF_Type_binary_op,
+    CF_Type_usertype,
+    CF_Type_eig,
+  } CF_Type;
   
   class NGS_DLL_HEADER CoefficientFunction
   {
@@ -307,9 +335,15 @@ namespace ngfem
     virtual string GetDescription () const;
     
     virtual void TraverseTree (const function<void(CoefficientFunction&)> & func);
-    virtual Array<CoefficientFunction*> InputCoefficientFunctions() const
-    { return Array<CoefficientFunction*>(); }
+    virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const
+    { return Array<shared_ptr<CoefficientFunction>>(); }
     virtual bool StoreUserData() const { return false; }
+
+    virtual CF_Type GetType() const { return CF_Type_undefined; } 
+    virtual void DoArchive (Archive & archive)
+    {
+      archive & dimension & dims & is_complex;
+    } 
   };
 
   inline ostream & operator<< (ostream & ost, const CoefficientFunction & cf)
@@ -629,7 +663,12 @@ namespace ngfem
       nonzero_dderiv = 0.0;
     }
     
-    
+    virtual CF_Type GetType() const { return CF_Type_constant; } 
+    virtual void DoArchive (Archive & archive)
+    {
+      CoefficientFunction::DoArchive(archive);
+      archive & val;
+    } 
   };
 
 
@@ -723,6 +762,12 @@ namespace ngfem
     double operator[] (int i) const { return val[i]; }
 
     virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const override;
+    virtual CF_Type GetType() const override { return CF_Type_domainconst; }
+    virtual void DoArchive (Archive & archive) override
+    {
+        CoefficientFunction::DoArchive(archive);
+        archive & val;
+    }
     
   protected:
     void CheckRange (int elind) const
@@ -1078,8 +1123,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 }); }
 
   using BASE::Evaluate;
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
@@ -1184,6 +1229,13 @@ public:
           }
       }
   }  
+
+  virtual CF_Type GetType() const override { return CF_Type_unary_op; }
+  virtual void DoArchive (Archive & archive) override
+  {
+      archive & name;
+      CoefficientFunction::DoArchive(archive);
+  }
 };
 
   template <typename OP /* , typename OPC */> 
@@ -1203,8 +1255,8 @@ shared_ptr<CoefficientFunction> UnaryOpCF(shared_ptr<CoefficientFunction> c1,
   shared_ptr<CoefficientFunction> c1, c2;
   OP lam;
   NONZERO lam_nonzero;
-  char opname;
-  bool is_complex;
+  string opname;
+  using BASE::is_complex;
   using BASE::Dimension;
   using BASE::SetDimension;
   using BASE::SetDimensions;
@@ -1212,7 +1264,7 @@ shared_ptr<CoefficientFunction> UnaryOpCF(shared_ptr<CoefficientFunction> c1,
 public:
   cl_BinaryOpCF (shared_ptr<CoefficientFunction> ac1, 
                  shared_ptr<CoefficientFunction> ac2, 
-                 OP alam, NONZERO alam_nonzero, char aopname)
+                 OP alam, NONZERO alam_nonzero, string aopname)
     : BASE(ac1->Dimension(), ac1->IsComplex() || ac2->IsComplex()),
       c1(ac1), c2(ac2), lam(alam),
       lam_nonzero(alam_nonzero),
@@ -1250,8 +1302,8 @@ public:
   virtual bool DefinedOn (const ElementTransformation & trafo) override
   { return c1->DefinedOn(trafo) && c2->DefinedOn(trafo); }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get(), c2.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1, c2 }); }
 
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
   {
@@ -1390,13 +1442,13 @@ public:
     c2->NonZeroPattern(ud, v2, d2, dd2);
     for (int i = 0; i < nonzero.Size(); i++)
       {
-        if (opname == '+' || opname == '-')
+        if (opname == "+" || opname == "-")
           {
             nonzero(i) = v1(i) || v2(i);
             nonzero_deriv(i) = d1(i) || d2(i);
             nonzero_dderiv(i) = dd1(i) || dd2(i);
           }
-        else if (opname == '*')
+        else if (opname == "*")
           {
             nonzero(i) = v1(i) || v2(i);
             nonzero_deriv(i) = (v1(i) && d2(i)) || (d1(i) && v2(i));
@@ -1411,6 +1463,18 @@ public:
       }
   }
   
+  virtual CF_Type GetType() const override {
+      if(opname =="+") return CF_Type_add;
+      if(opname =="-") return CF_Type_sub;
+      if(opname =="*") return CF_Type_mult;
+      if(opname =="/") return CF_Type_div;
+      return CF_Type_binary_op;
+  }
+  virtual void DoArchive (Archive & archive) override 
+  {
+      archive & opname;
+      CoefficientFunction::DoArchive(archive);
+  }
 
 };
 
@@ -1419,58 +1483,13 @@ INLINE shared_ptr<CoefficientFunction> BinaryOpCF(shared_ptr<CoefficientFunction
                                                   shared_ptr<CoefficientFunction> c2, 
                                                   OP lam,
                                                   NONZERO lam_nonzero,
-                                                  char opname)
+                                                  string opname)
 {
   return shared_ptr<CoefficientFunction> (new cl_BinaryOpCF<OP,NONZERO> 
                                           (c1, c2, lam, lam_nonzero, opname));
 }
 
 
-
-
-#ifdef NGS_PYTHON
-extern
-void ExportUnaryFunction2 (class pybind11::module & m, string name,
-                             std::function<shared_ptr<CoefficientFunction>(shared_ptr<CoefficientFunction>)> creator,
-                             std::function<double(double)> func_real,
-                             std::function<Complex(Complex)> func_complex);
-
-template <typename FUNC>
-void ExportUnaryFunction (class pybind11::module & m, string name)
-{
-  auto creator = [] (shared_ptr<CoefficientFunction> input) -> shared_ptr<CoefficientFunction>
-    {
-      FUNC func;
-      return UnaryOpCF (input, func /*, func */);
-    };
-  
-  FUNC func;
-  ExportUnaryFunction2 (m, name, creator, func, func);
-}
-
-
-
-extern
-void ExportBinaryFunction2 (class pybind11::module & m, string name,
-                            std::function<shared_ptr<CoefficientFunction>(shared_ptr<CoefficientFunction>,
-                                                                          shared_ptr<CoefficientFunction>)> creator,
-                            std::function<double(double,double)> func_real,
-                            std::function<Complex(Complex,Complex)> func_complex);
-
-template <typename FUNC>
-void ExportBinaryFunction (class pybind11::module & m, string name)
-{
-  auto creator = [] (shared_ptr<CoefficientFunction> in1,
-                     shared_ptr<CoefficientFunction> in2) -> shared_ptr<CoefficientFunction>
-    {
-      FUNC func;
-      return BinaryOpCF (in1, in2, func, 
-                         [](bool a, bool b) { return a||b; }, '+');
-    };
-  
-  FUNC func;
-  ExportBinaryFunction2 (m, name, creator, func, func);
-}
 
 
   NGS_DLL_HEADER shared_ptr<CoefficientFunction>
@@ -1491,8 +1510,6 @@ void ExportBinaryFunction (class pybind11::module & m, string name)
   NGS_DLL_HEADER shared_ptr<CoefficientFunction>
   MakeDomainWiseCoefficientFunction (Array<shared_ptr<CoefficientFunction>> aci);
   
-
-#endif
 
 
 
@@ -1525,6 +1542,9 @@ void ExportBinaryFunction (class pybind11::module & m, string name)
 
   NGS_DLL_HEADER
   shared_ptr<CoefficientFunction> NormCF (shared_ptr<CoefficientFunction> coef);
+
+  NGS_DLL_HEADER
+  shared_ptr<CoefficientFunction> EigCF (shared_ptr<CoefficientFunction> coef);
 
   NGS_DLL_HEADER
   shared_ptr<CoefficientFunction> IfPos (shared_ptr<CoefficientFunction> cf_if,

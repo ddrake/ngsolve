@@ -99,7 +99,7 @@ namespace ngfem
       ost << ", dims = " << Dimensions()[0] << " x " << Dimensions()[1];
     ost << endl;
 
-    Array<CoefficientFunction*> input = InputCoefficientFunctions();
+    Array<shared_ptr<CoefficientFunction>> input = InputCoefficientFunctions();
     for (int i = 0; i < input.Size(); i++)
       input[i] -> PrintReportRec (ost, level+1);
   }
@@ -963,8 +963,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 }); }
 
   virtual bool DefinedOn (const ElementTransformation & trafo) override
   { return c1->DefinedOn(trafo); }
@@ -1032,6 +1032,12 @@ public:
   {
     c1->NonZeroPattern (ud, nonzero, nonzero_deriv, nonzero_dderiv);
   }  
+  virtual CF_Type GetType() const override { return CF_Type_scale; }
+  virtual void DoArchive (Archive & archive) override
+  {
+    CoefficientFunction::DoArchive(archive);
+    archive & scal;
+  }
 };
 
 
@@ -1050,38 +1056,39 @@ public:
   // virtual bool IsComplex() const { return true; }
   // virtual int Dimension() const { return c1->Dimension(); }
 
-  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func)
+  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func) override
   {
     c1->TraverseTree (func);
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const
-  { return Array<CoefficientFunction*>({ c1.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 }); }
   
-  virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const
+  virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const override
   {
     TraverseDimensions( c1->Dimensions(), [&](int ind, int i, int j) {
         code.body += Var(index,i,j).Assign(Var(scal) * Var(inputs[0],i,j));
     });
   }
 
-  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const 
+  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const  override
   {
     throw Exception ("real Evaluate called for complex ScaleCF");
   }
-  virtual Complex EvaluateComplex (const BaseMappedIntegrationPoint & ip) const 
+  
+  virtual Complex EvaluateComplex (const BaseMappedIntegrationPoint & ip) const override
   {
     return scal * c1->EvaluateComplex(ip);    
   }
   virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
-                        FlatVector<Complex> result) const
+                        FlatVector<Complex> result) const override
   {
     c1->Evaluate (ip, result);
     result *= scal;
   }
   virtual void Evaluate(const BaseMappedIntegrationRule & ir,
-                        FlatMatrix<Complex> result) const
+                        FlatMatrix<Complex> result) const override
   {
     c1->Evaluate (ir, result);
     result *= scal;
@@ -1089,25 +1096,31 @@ public:
 
   
   virtual void Evaluate (const SIMD_BaseMappedIntegrationRule & ir,
-                         BareSliceMatrix<SIMD<Complex>> values) const
+                         BareSliceMatrix<SIMD<Complex>> values) const override
   {
     c1->Evaluate (ir, values);
     values.AddSize(Dimension(), ir.Size()) *= scal;
   }
 
   virtual void Evaluate (const BaseMappedIntegrationRule & ir, 
-                         BareSliceMatrix<AutoDiffDiff<1,double>> values) const
+                         BareSliceMatrix<AutoDiffDiff<1,double>> values) const override
   {
     throw Exception ("can't diff complex CF (ScaleCoefficientFunctionC)");
   }
   
   
   virtual void NonZeroPattern (const class ProxyUserData & ud, FlatVector<bool> nonzero,
-                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const
+                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const override
   {
     c1->NonZeroPattern (ud, nonzero, nonzero_deriv, nonzero_dderiv);
   }  
     
+  virtual CF_Type GetType() const override { return CF_Type_scale_complex; }
+  virtual void DoArchive (Archive & archive) override
+  {
+    CoefficientFunction::DoArchive(archive);
+    archive & scal;
+  }
 };
 
 // ***********************************************************************************
@@ -1126,17 +1139,17 @@ public:
     SetDimensions (c2->Dimensions());
   }
   
-  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func)
+  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func) override
   {
     c1->TraverseTree (func);
     c2->TraverseTree (func);
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const
-  { return Array<CoefficientFunction*>({ c1.get(), c2.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1, c2 }); }
 
-  virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const
+  virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const override
   {
     TraverseDimensions( c2->Dimensions(), [&](int ind, int i, int j) {
       code.body += Var(index,i,j).Assign( Var(inputs[0]) * Var(inputs[1],i,j) );
@@ -1144,13 +1157,13 @@ public:
   }
 
   using BASE::Evaluate;
-  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const
+  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
   {
     throw Exception ("double MultScalVecCF::Evaluate called");
   }
 
   virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
-                        FlatVector<> result) const
+                        FlatVector<> result) const override
   {
     Vec<1> v1;
     c1->Evaluate (ip, v1);
@@ -1159,7 +1172,7 @@ public:
   }
 
   virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
-                        FlatVector<Complex> result) const
+                        FlatVector<Complex> result) const override
   {
     Vec<1,Complex> v1;
     c1->Evaluate (ip, v1);
@@ -1168,7 +1181,7 @@ public:
   }
 
   virtual void Evaluate(const BaseMappedIntegrationRule & ir,
-                        FlatMatrix<Complex> result) const
+                        FlatMatrix<Complex> result) const override
   {
     STACK_ARRAY(double, hmem1, 2*ir.Size());
     FlatMatrix<Complex> temp1(ir.Size(), 1, reinterpret_cast<Complex*> (&hmem1[0]));
@@ -1211,7 +1224,7 @@ public:
   }
 
   virtual void NonZeroPattern (const class ProxyUserData & ud, FlatVector<bool> nonzero,
-                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const
+                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const override
   {
     int dim = Dimension();
     Vector<bool> v1(1), d1(1), dd1(1);
@@ -1225,6 +1238,8 @@ public:
         nonzero_dderiv(i) = (v1(0) && dd2(i)) || (d1(0) && d2(i)) || (dd1(0) && v2(i));
       }
   }
+
+  virtual CF_Type GetType() const override { return CF_Type_mult; }
 };
 
 
@@ -1261,8 +1276,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get(), c2.get() }); }  
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1, c2 }); }  
   
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
   {
@@ -1357,6 +1372,7 @@ public:
     nonzero_dderiv = nzdd;
   }
 
+  virtual CF_Type GetType() const override { return CF_Type_mult; }
 };
 
 template <int DIM>
@@ -1391,8 +1407,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get(), c2.get() }); }  
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1, c2 }); }  
 
   using T_CoefficientFunction<T_MultVecVecCoefficientFunction<DIM>>::Evaluate;
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
@@ -1499,10 +1515,45 @@ public:
     nonzero_dderiv = nzdd;
   }
 
+  virtual CF_Type GetType() const override { return CF_Type_mult; }
 };
 
 
 
+class EigCoefficientFunction : public CoefficientFunctionNoDerivative
+{
+  shared_ptr<CoefficientFunction> cfmat;
+  int dim1;
+  int vecdim;
+  
+public:
+  EigCoefficientFunction (shared_ptr<CoefficientFunction> ac1) : CoefficientFunctionNoDerivative(ac1->Dimension() + ac1->Dimensions()[0],false), cfmat(ac1)
+  {
+    vecdim = cfmat->Dimensions()[0];
+    dim1 = cfmat->Dimension();
+  }
+  
+  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const 
+  {
+    return 0;
+  }
+  virtual void Evaluate (const BaseMappedIntegrationPoint & ip, FlatVector<> res) const 
+  {
+    STACK_ARRAY(double,mem, dim1);
+    FlatVector<double> vec(dim1, &mem[0]);
+    
+    cfmat->Evaluate (ip, vec);
+
+    FlatMatrix<double> mat(vecdim,vecdim, &mem[0]);
+    FlatVector<double> lami(vecdim, &res[dim1]);
+    FlatMatrix<double> eigenvecs(vecdim,vecdim,&res[0]);
+    
+    CalcEigenSystem(mat,lami,eigenvecs);
+  }
+
+  virtual CF_Type GetType() const { return CF_Type_eig; }
+    
+};
 
 
 
@@ -1524,8 +1575,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get() }); }  
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 }); }  
   
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
   {
@@ -1606,6 +1657,7 @@ public:
     nonzero_dderiv = nzd || nzdd;
   }
 
+  virtual CF_Type GetType() const override { return CF_Type_norm; }
 };
 
 
@@ -1623,16 +1675,16 @@ public:
     dim1 = c1->Dimension();
   }
   
-  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func)
+  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func) override
   {
     c1->TraverseTree (func);
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const
-  { return Array<CoefficientFunction*>({ c1.get() }); }  
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 }); }  
   
-  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const
+  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
   {
     Vec<1> res;
     Evaluate (ip, res);
@@ -1640,7 +1692,7 @@ public:
   }
 
   virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
-                        FlatVector<> result) const
+                        FlatVector<> result) const override
   {
     VectorMem<10,TIN> v1(dim1);
     c1->Evaluate (ip, v1);
@@ -1648,7 +1700,7 @@ public:
   }
 
   virtual void Evaluate(const BaseMappedIntegrationPoint & ip,
-                        FlatVector<Complex> result) const
+                        FlatVector<Complex> result) const override
   {
     Vec<1> res;
     Evaluate (ip, res);
@@ -1656,22 +1708,22 @@ public:
   }
 
   
-  virtual bool ElementwiseConstant () const
+  virtual bool ElementwiseConstant () const override
   { return c1->ElementwiseConstant(); }
 
   
   virtual void Evaluate(const BaseMappedIntegrationRule & ir,
-                        FlatMatrix <> result) const
+                        BareSliceMatrix<> result) const override
   {
     STACK_ARRAY(double,hmem,ir.Size()*dim1*sizeof(TIN)/sizeof(double));
     FlatMatrix<TIN> inval(ir.IR().GetNIP(), dim1, reinterpret_cast<TIN*>(&hmem[0]));
     c1->Evaluate (ir, inval);
-    for (size_t i = 0; i < result.Height(); i++)
+    for (size_t i = 0; i < ir.Size(); i++)
       result(i,0) = L2Norm(inval.Row(i));
   }
 
 
-  virtual void Evaluate (const SIMD_BaseMappedIntegrationRule & ir, BareSliceMatrix<SIMD<double>> values) const
+  virtual void Evaluate (const SIMD_BaseMappedIntegrationRule & ir, BareSliceMatrix<SIMD<double>> values) const override
   {
     STACK_ARRAY(SIMD<Complex>,hmem,ir.Size()*dim1);
     FlatMatrix<SIMD<Complex>> inval(dim1, ir.Size(), &hmem[0]);
@@ -1688,7 +1740,7 @@ public:
 
   
   virtual void NonZeroPattern (const class ProxyUserData & ud, FlatVector<bool> nonzero,
-                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const
+                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const override
   {
     Vector<bool> v1(dim1), d1(dim1), dd1(dim1);
     c1->NonZeroPattern (ud, v1, d1, dd1);
@@ -1704,9 +1756,8 @@ public:
     nonzero_dderiv = nzd || nzdd;
   }
 
+  virtual CF_Type GetType() const override { return CF_Type_norm; }
 };
-
-
 
   
 
@@ -1732,14 +1783,14 @@ public:
     inner_dim = dims_c1[1];
   }
   
-  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func)
+  virtual void TraverseTree (const function<void(CoefficientFunction&)> & func) override
   {
     c1->TraverseTree (func);
     c2->TraverseTree (func);
     func(*this);
   }
 
-  virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const {
+  virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const override {
     FlatArray<int> hdims = Dimensions();
       for (int i : Range(hdims[0]))
         for (int j : Range(hdims[1])) {
@@ -1750,12 +1801,12 @@ public:
         }
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const
-  { return Array<CoefficientFunction*>({ c1.get(), c2.get() }); }  
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1, c2 }); }  
 
 
   virtual void NonZeroPattern (const class ProxyUserData & ud, FlatVector<bool> nonzero,
-                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const
+                               FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const override
   {
     FlatArray<int> hdims = Dimensions();
     Vector<bool> v1(hdims[0]*inner_dim), v2(hdims[1]*inner_dim);
@@ -1784,13 +1835,13 @@ public:
   }
 
   
-  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const 
+  virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
   {
     throw Exception ("MultMatMatCF:: scalar evaluate for matrix called");
   }
 
   virtual void Evaluate (const BaseMappedIntegrationPoint & ip,
-                         FlatVector<> result) const
+                         FlatVector<> result) const override
   {
     FlatArray<int> hdims = Dimensions();
     Vector<> va(hdims[0]*inner_dim);
@@ -1806,7 +1857,7 @@ public:
   }  
 
   virtual void Evaluate (const BaseMappedIntegrationPoint & ip,
-                         FlatVector<Complex> result) const
+                         FlatVector<Complex> result) const override
   {
     FlatArray<int> hdims = Dimensions();
     STACK_ARRAY(double,mema,2*hdims[0]*inner_dim);
@@ -1826,7 +1877,7 @@ public:
   }  
 
   template <typename MIR, typename T, ORDERING ORD>
-  void T_Evaluate (const MIR & mir, BareSliceMatrix<T,ORD> values) const
+  void T_Evaluate (const MIR & mir, BareSliceMatrix<T,ORD> values) const 
   {
     FlatArray<int> hdims = Dimensions();    
     STACK_ARRAY(T, hmem1, mir.Size()*hdims[0]*inner_dim);
@@ -1881,6 +1932,7 @@ public:
           }
   }
  
+  virtual CF_Type GetType() const override { return CF_Type_mult; }
 };
 
 
@@ -1923,8 +1975,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get(), c2.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1, c2 }); }
 
   virtual void GenerateCode(Code &code, FlatArray<int> inputs, int index) const override {
       auto dims = c1->Dimensions();
@@ -2031,6 +2083,7 @@ public:
           values(i,k) += va(i*inner_dim+j, k) * vb(j,k);
   }
 
+  virtual CF_Type GetType() const override { return CF_Type_mult; }
 };
 
 
@@ -2063,8 +2116,8 @@ public:
           code.body += Var(index,i,j).Assign( Var(inputs[0],j,i) );
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get() } ); }  
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 } ); }  
 
   virtual void NonZeroPattern (const class ProxyUserData & ud, FlatVector<bool> nonzero,
                                FlatVector<bool> nonzero_deriv, FlatVector<bool> nonzero_dderiv) const override
@@ -2164,6 +2217,7 @@ public:
           values(j*hdims[1]+k, i) = in0(k*hdims[0]+j, i);
   }
   
+  virtual CF_Type GetType() const override { return CF_Type_trans; }
   };  
 
 
@@ -2199,7 +2253,7 @@ public:
                        // [](double a, double b, double & dda, double & ddb) { dda = 1; ddb = 1; },
                        // [](double a, double b, double & ddada, double & ddadb, double & ddbdb) 
                        // { ddada = 0; ddadb = 0; ddbdb = 0; },
-                       [](bool a, bool b) { return a||b; }, '+'
+                       [](bool a, bool b) { return a||b; }, "+"
                        );
   }
   
@@ -2213,7 +2267,7 @@ public:
                        [](double a, double b, double & ddada, double & ddadb, double & ddbdb) 
                        { ddada = 0; ddadb = 0; ddbdb = 0; },
                        */
-                       [](bool a, bool b) { return a||b; }, '-'
+                       [](bool a, bool b) { return a||b; }, "-"
                        );
   }
   shared_ptr<CoefficientFunction> operator* (shared_ptr<CoefficientFunction> c1, shared_ptr<CoefficientFunction> c2)
@@ -2251,7 +2305,7 @@ public:
                        [](double a, double b, double & ddada, double & ddadb, double & ddbdb) 
                        { ddada = 0; ddadb = 1; ddbdb = 0; },
                        */
-                       [](bool a, bool b) { return a&&b; }, '*'
+                       [](bool a, bool b) { return a&&b; }, "*"
                        );
   }
 
@@ -2305,7 +2359,11 @@ public:
     else
       return make_shared<NormCoefficientFunction> (coef);
   }
-  
+
+  shared_ptr<CoefficientFunction> EigCF (shared_ptr<CoefficientFunction> coef)
+  {
+    return make_shared<EigCoefficientFunction> (coef);
+  }
   
   shared_ptr<CoefficientFunction> operator/ (shared_ptr<CoefficientFunction> c1, shared_ptr<CoefficientFunction> c2)
   {
@@ -2317,7 +2375,7 @@ public:
                        [](double a, double b, double & ddada, double & ddadb, double & ddbdb) 
                        { ddada = 0; ddadb = -1.0/(b*b); ddbdb = 2*a/(b*b*b); },
                        */
-                       [](bool a, bool b) { return a; }, '/'
+                       [](bool a, bool b) { return a; }, "/"
                        );
   }
 
@@ -2356,8 +2414,8 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
-  { return Array<CoefficientFunction*>({ c1.get() }); }
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
+  { return Array<shared_ptr<CoefficientFunction>>({ c1 }); }
 
   using BASE::Evaluate;
   virtual double Evaluate (const BaseMappedIntegrationPoint & ip) const override
@@ -2424,6 +2482,13 @@ public:
     nonzero_deriv(0) = d1(comp);
     nonzero_dderiv(0) = dd1(comp);
   }  
+
+  virtual CF_Type GetType() const override { return CF_Type_component; }
+  virtual void DoArchive (Archive & archive) override
+  {
+      CoefficientFunction::DoArchive(archive);
+      archive & comp;
+  }
 };
 
   shared_ptr<CoefficientFunction>
@@ -2493,12 +2558,12 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
   {
-    Array<CoefficientFunction*> cfa;
+    Array<shared_ptr<CoefficientFunction>> cfa;
     for (auto cf : ci)
-      cfa.Append (cf.get());
-    return Array<CoefficientFunction*>(cfa);
+      cfa.Append (cf);
+    return Array<shared_ptr<CoefficientFunction>>(cfa);
   } 
   
   
@@ -2565,6 +2630,7 @@ public:
     Evaluate (ip, res);
     return res(0);
   }
+  virtual CF_Type GetType() const override { return CF_Type_domainwise; }
 };
 
   shared_ptr<CoefficientFunction>
@@ -2601,11 +2667,11 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
   {
-    Array<CoefficientFunction*> cfa;
-    cfa.Append (c1.get());
-    return Array<CoefficientFunction*>(cfa);
+    Array<shared_ptr<CoefficientFunction>> cfa;
+    cfa.Append (c1);
+    return Array<shared_ptr<CoefficientFunction>>(cfa);
   } 
   
   
@@ -3062,9 +3128,9 @@ class IfPosCoefficientFunction : public T_CoefficientFunction<IfPosCoefficientFu
       func(*this);
     }
     
-    virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
+    virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
     {
-      return Array<CoefficientFunction*>( { cf_if.get(), cf_then.get(), cf_else.get() } );
+      return Array<shared_ptr<CoefficientFunction>>( { cf_if, cf_then, cf_else } );
     }
     
     virtual void NonZeroPattern (const class ProxyUserData & ud, FlatVector<bool> nonzero,
@@ -3082,6 +3148,8 @@ class IfPosCoefficientFunction : public T_CoefficientFunction<IfPosCoefficientFu
           nonzero_dderiv(i) = dd1(i) || dd2(i);
         }
     }  
+
+  virtual CF_Type GetType() const override { return CF_Type_ifpos; }
   };
   
   extern
@@ -3131,12 +3199,12 @@ public:
     func(*this);
   }
 
-  virtual Array<CoefficientFunction*> InputCoefficientFunctions() const override
+  virtual Array<shared_ptr<CoefficientFunction>> InputCoefficientFunctions() const override
   {
-    Array<CoefficientFunction*> cfa;
+    Array<shared_ptr<CoefficientFunction>> cfa;
     for (auto cf : ci)
-      cfa.Append (cf.get());
-    return Array<CoefficientFunction*>(cfa);
+      cfa.Append (cf);
+    return Array<shared_ptr<CoefficientFunction>>(cfa);
   } 
 
 
@@ -3235,6 +3303,12 @@ public:
       }
   }
 
+  virtual CF_Type GetType() const override { return CF_Type_vectorial; } 
+  virtual void DoArchive (Archive & archive) override
+  {
+    CoefficientFunction::DoArchive(archive);
+    archive & dimi;
+  } 
 };
 
   void VectorialCoefficientFunction::GenerateCode(Code &code, FlatArray<int> inputs, int index) const
@@ -3254,6 +3328,7 @@ public:
             input_index = 0;
         }
     });
+
   }
 
 
@@ -3343,6 +3418,13 @@ public:
       Evaluate (ir, values);
     }
     */
+
+    virtual CF_Type GetType() const override { return CF_Type_coordinate; } 
+    virtual void DoArchive (Archive & archive) override
+    {
+      CoefficientFunction::DoArchive(archive);
+      archive & dir;
+    } 
   };
 
 
@@ -3417,10 +3499,10 @@ shared_ptr<CoefficientFunction> MakeCoordinateCoefficientFunction (int comp)
            int mypos = steps.Pos (&stepcf);
            if (!inputs[mypos].Size())
              {
-               Array<CoefficientFunction*> in = stepcf.InputCoefficientFunctions();
+               Array<shared_ptr<CoefficientFunction>> in = stepcf.InputCoefficientFunctions();
                max_inputsize = max2(in.Size(), max_inputsize);
                for (auto incf : in)
-                 inputs.Add (mypos, steps.Pos(incf));
+                 inputs.Add (mypos, steps.Pos(incf.get()));
              }
          });
       cout << IM(3) << "inputs = " << endl << inputs << endl;
@@ -4209,6 +4291,8 @@ class RealCF : public CoefficientFunctionNoDerivative
       cf->Evaluate (ir, cvalues);
       values.AddSize(Dimension(), ir.Size()) = Real(cvalues);
     }
+
+    virtual CF_Type GetType() const override { return CF_Type_real; }
   };
 
   class ImagCF : public CoefficientFunctionNoDerivative
@@ -4251,6 +4335,8 @@ class RealCF : public CoefficientFunctionNoDerivative
       cf->Evaluate (ir, cvalues);
       values.AddSize(Dimension(), ir.Size()) = Imag(cvalues);
     }
+
+    virtual CF_Type GetType() const override { return CF_Type_imag; }
   };
 
   shared_ptr<CoefficientFunction> Real(shared_ptr<CoefficientFunction> cf)
@@ -4269,6 +4355,7 @@ class RealCF : public CoefficientFunctionNoDerivative
       cf->RealCompile(maxderiv, wait);
     return cf;
   }
+
   
 }
 

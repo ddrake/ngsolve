@@ -91,6 +91,7 @@ namespace ngcomp
     checksum = flags.GetDefineFlag ("checksum");
     spd = flags.GetDefineFlag ("spd");
     if (spd) symmetric = true;
+    SetCheckUnused (!flags.GetDefineFlagX("check_unused").IsFalse());
   }
 
 
@@ -140,6 +141,7 @@ namespace ngcomp
 
     precompute = flags.GetDefineFlag ("precompute");
     checksum = flags.GetDefineFlag ("checksum");
+    SetCheckUnused (!flags.GetDefineFlagX("check_unused").IsFalse());    
   }
 
 
@@ -178,7 +180,7 @@ namespace ngcomp
     auto anydim = dynamic_pointer_cast<BilinearFormIntegratorAnyDim> (bfi);
     if (anydim) bfi = anydim->GetBFI (ma->GetDimension());
     */
-    bfi = FixDimension(bfi, fespace->GetSpacialDimension());
+    bfi = FixDimension(bfi, fespace->GetSpatialDimension());
     
     if (symmetric && bfi->IsSymmetric().IsFalse())
       throw Exception (string ("Adding non-symmetric integrator to symmetric bilinear-form\n")+
