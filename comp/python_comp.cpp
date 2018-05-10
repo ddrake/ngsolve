@@ -208,14 +208,6 @@ auto ExportFESpace (py::module & m, string pyname)
     
     .def(py::pickle(fesPickle,
                     (shared_ptr<FES>(*)(py::tuple)) fesUnpickle<FES>))
-    
-    .def_static("__flags_doc__", [] ()
-                {
-                  auto flags_doc = py::cast<py::dict>(py::module::import("ngsolve").
-                                                      attr("FESpace").
-                                                      attr("__flags_doc__")());
-                  return flags_doc;
-                })
     ;
   
   return pyspace;
@@ -1180,13 +1172,10 @@ used_idnrs : list of int = None
                 })
     .def(py::pickle([] (const GridFunction& gf)
                     {
-                      auto fes = gf.GetFESpace();
-                      auto flags = gf.GetFlags();
-                      auto name = gf.GetName();
-                      py::list lst;
-                      for(auto val : gf.GetVector().FVDouble())
-                        lst.append(val);
-                      return py::make_tuple(fes,name,flags, lst);
+                      return py::make_tuple(gf.GetFESpace(),
+                                            gf.GetName(),
+                                            gf.GetFlags(),
+                                            gf.GetVectorPtr());
                     },
                     [] (py::tuple state)
                     {
@@ -1194,9 +1183,7 @@ used_idnrs : list of int = None
                                                    state[1].cast<string>(),
                                                    state[2].cast<Flags>());
                       gf->Update();
-                      auto lst = state[3].cast<py::list>();
-                      for(auto i : Range(py::len(lst)))
-                        gf->GetVector().FVDouble()[i] = lst[i].cast<double>();
+                      gf->GetVector() = *py::cast<shared_ptr<BaseVector>>(state[3]);
                       return gf;
                     }
                     ))
