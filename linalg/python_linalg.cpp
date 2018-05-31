@@ -42,11 +42,17 @@ void ExportSparseMatrix(py::module m)
                    vals[ii] = rv[j];
                  }
              }
-
+           /*
+           t2.Start();
+           // still copies, we don't understand why
            py::object pyri = py::cast(std::move(ri));
            py::object pyci = py::cast(std::move(ci));
            py::object pyvals = py::cast(std::move(vals));
+           t2.Stop();
            return py::make_tuple (pyri, pyci, pyvals);
+           */
+           // moves the arrays
+           return py::make_tuple (move(ri), move(ci), move(vals));
          })
 
     .def_static("CreateFromCOO",
@@ -79,6 +85,10 @@ void NGS_DLL_HEADER ExportNgla(py::module &m) {
     ;
     
   py::class_<ParallelDofs, shared_ptr<ParallelDofs>> (m, "ParallelDofs")
+#ifdef PARALLEL
+    .def("SubSet", [](const ParallelDofs & self, shared_ptr<BitArray> take_dofs) { 
+        return self.SubSet(take_dofs); })
+#endif
     .def_property_readonly ("ndoflocal", [](const ParallelDofs & self) 
 			    { return self.GetNDofLocal(); },
                             "number of degrees of freedom")
@@ -453,6 +463,8 @@ void NGS_DLL_HEADER ExportNgla(py::module &m) {
         { return self.Height(); } )
     .def_property_readonly("width", [] ( BaseMatrix & self)
         { return self.Width(); } )
+    .def_property_readonly("nze", [] ( BaseMatrix & self)
+                           { return self.NZE(); }, "number of non-zero elements")
     // .def("CreateMatrix", &BaseMatrix::CreateMatrix)
     .def("CreateMatrix", [] ( BaseMatrix & self)
         { return self.CreateMatrix(); } )
@@ -581,6 +593,7 @@ inverse : string
 #ifdef PARALLEL
   py::class_<ParallelMatrix, shared_ptr<ParallelMatrix>, BaseMatrix>
     (m, "ParallelMatrix", "MPI-distributed matrix")
+    .def(py::init<shared_ptr<BaseMatrix>, shared_ptr<ParallelDofs>>())
     .def_property_readonly("local_mat", [](ParallelMatrix & mat) { return mat.GetMatrix(); })
     ;
 
@@ -622,6 +635,16 @@ inverse : string
          "performs steps Gauss-Seidel iterations for the linear system A x = b in reverse order")
     ;
 
+  py::class_<SparseFactorization, shared_ptr<SparseFactorization>, BaseMatrix>
+    (m, "SparseFactorization")
+    .def("Smooth", [] (SparseFactorization & self, BaseVector & u, BaseVector & y)
+         {
+           self.Smooth (u, y /* this is not needed */, y);
+         }, "perform smoothing step (needs non-symmetric storage so symmetric sparse matrix)")
+    ;
+
+  py::class_<SparseCholesky<double>, shared_ptr<SparseCholesky<double>>, SparseFactorization> (m, "SparseCholesky_d");
+  py::class_<SparseCholesky<Complex>, shared_ptr<SparseCholesky<Complex>>, SparseFactorization> (m, "SparseCholesky_c");
   
   py::class_<Projector, shared_ptr<Projector>, BaseMatrix> (m, "Projector")
     .def(py::init<shared_ptr<BitArray>,bool>());
