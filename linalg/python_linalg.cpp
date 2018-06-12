@@ -69,6 +69,8 @@ void ExportSparseMatrix(py::module m)
 
     .def("__matmul__", [] (const SparseMatrix<double> & a, const SparseMatrix<double> & b)
          { return MatMult(a,b); })
+    .def("__matmul__", [](shared_ptr<SparseMatrix<double>> a, shared_ptr<BaseMatrix> mb)
+         ->shared_ptr<BaseMatrix> { return make_shared<ProductMatrix> (a, mb); })
     ;
 
   py::class_<SparseMatrixSymmetric<T>, shared_ptr<SparseMatrixSymmetric<T>>, SparseMatrix<T>>
@@ -532,6 +534,16 @@ inverse : string
     // .def("Inverse", [](BM &m)  { return m.InverseMatrix(); })
 
     .def_property_readonly("T", [](shared_ptr<BM> m)->shared_ptr<BaseMatrix> { return make_shared<Transpose> (m); })
+    .def("__matmul__", [](shared_ptr<BM> ma, shared_ptr<BM> mb)->shared_ptr<BaseMatrix>
+         { return make_shared<ProductMatrix> (ma, mb); })
+    .def("__add__", [](shared_ptr<BM> ma, shared_ptr<BM> mb)->shared_ptr<BaseMatrix>
+         { return make_shared<SumMatrix> (ma, mb, 1, 1); })
+    .def("__sub__", [](shared_ptr<BM> ma, shared_ptr<BM> mb)->shared_ptr<BaseMatrix>
+         { return make_shared<SumMatrix> (ma, mb, 1, -1); })
+    .def("__rmul__", [](shared_ptr<BM> ma, double a)->shared_ptr<BaseMatrix>
+         { return make_shared<VScaleMatrix<double>> (ma, a); })
+    .def("__rmul__", [](shared_ptr<BM> ma, Complex a)->shared_ptr<BaseMatrix>
+         { return make_shared<VScaleMatrix<Complex>> (ma, a); })
     .def("Update", [](BM &m) { m.Update(); }, py::call_guard<py::gil_scoped_release>())
     ;
 
@@ -648,6 +660,10 @@ inverse : string
   
   py::class_<Projector, shared_ptr<Projector>, BaseMatrix> (m, "Projector")
     .def(py::init<shared_ptr<BitArray>,bool>());
+    ;
+
+    py::class_<ngla::IdentityMatrix, shared_ptr<ngla::IdentityMatrix>, BaseMatrix> (m, "IdentityMatrix")
+    .def(py::init<>())
     ;
 
   py::class_<KrylovSpaceSolver, shared_ptr<KrylovSpaceSolver>, BaseMatrix> (m, "KrylovSpaceSolver")
