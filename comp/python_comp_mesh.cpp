@@ -91,6 +91,16 @@ void ExportNgcompMesh (py::module &m)
                              auto& mesh = node.Mesh();
                              switch(node.GetType())
                                {
+                               case NT_VERTEX:
+                                 {
+                                   Array<int> enums;
+                                   for (auto el : mesh.GetVertexElements(node.GetNr()))
+                                     for (auto edge : mesh.GetElement(ElementId(VOL,el)).Edges())
+                                       if (!enums.Contains(edge))
+                                         enums.Append(edge);
+                                   QuickSort (enums);
+                                   return MakePyTuple(Substitute(enums, Nr2Edge));
+                                 }
                                case NT_FACE:
                                  return MakePyTuple(Substitute(mesh.GetFaceEdges(node.GetNr()), Nr2Edge));
                                case NT_CELL:
@@ -170,6 +180,21 @@ void ExportNgcompMesh (py::module &m)
                              return MakePyTuple(Substitute(el.Faces(), Nr2Face));
                            },
                            "tuple of global face numbers")
+    .def_property_readonly("facets", [](Ngs_Element &el)
+                           {
+                             switch (ElementTopology::GetSpaceDim(el.GetType()))
+                               {
+                               case 1:
+                                 return MakePyTuple(Substitute(el.Vertices(), Nr2Vert));
+                               case 2:
+                                 return MakePyTuple(Substitute(el.Edges(), Nr2Edge));
+                               case 3:
+                                 return MakePyTuple(Substitute(el.Faces(), Nr2Face));
+                               default:
+                                 throw Exception ("Illegal dimension in Ngs_Element.faces");
+                               }
+                           },
+                           "tuple of global face, edge or vertex numbers")
     .def_property_readonly("type", [](Ngs_Element &self)
         { return self.GetType(); },
         "geometric shape of element")
